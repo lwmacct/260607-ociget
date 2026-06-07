@@ -2,6 +2,75 @@ package server
 
 import "testing"
 
+func TestParseDownloadPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		wantImage string
+		wantPath  string
+		wantErr   bool
+	}{
+		{
+			name:      "ghcr image",
+			path:      "/download/ghcr.io/lwmacct/260606-sshrt:v0.129.260607/-/usr/local/bin/app",
+			wantImage: "ghcr.io/lwmacct/260606-sshrt:v0.129.260607",
+			wantPath:  "usr/local/bin/app",
+		},
+		{
+			name:      "registry proxy image",
+			path:      "/download/1181.s.kuaicdn.cn:11818/ghcr.io/lwmacct/260606-sshrt:v0.129.260607/-/usr/local/bin/app",
+			wantImage: "1181.s.kuaicdn.cn:11818/ghcr.io/lwmacct/260606-sshrt:v0.129.260607",
+			wantPath:  "usr/local/bin/app",
+		},
+		{
+			name:      "digest image",
+			path:      "/download/alpine@sha256:abc123/-/etc/alpine-release",
+			wantImage: "alpine@sha256:abc123",
+			wantPath:  "etc/alpine-release",
+		},
+		{
+			name:    "missing separator",
+			path:    "/download/ghcr.io/lwmacct/image:tag/usr/local/bin/app",
+			wantErr: true,
+		},
+		{
+			name:    "empty image",
+			path:    "/download/-/usr/local/bin/app",
+			wantErr: true,
+		},
+		{
+			name:    "empty path",
+			path:    "/download/ghcr.io/lwmacct/image:tag/-/",
+			wantErr: true,
+		},
+		{
+			name:    "wrong prefix",
+			path:    "/files/ghcr.io/lwmacct/image:tag/-/usr/local/bin/app",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotImage, gotPath, err := parseDownloadPath(tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseDownloadPath() expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseDownloadPath() unexpected error: %v", err)
+			}
+			if gotImage != tt.wantImage || gotPath != tt.wantPath {
+				t.Fatalf("parseDownloadPath() = (%q, %q), want (%q, %q)",
+					gotImage, gotPath, tt.wantImage, tt.wantPath,
+				)
+			}
+		})
+	}
+}
+
 func TestParsePlatform(t *testing.T) {
 	tests := []struct {
 		name     string

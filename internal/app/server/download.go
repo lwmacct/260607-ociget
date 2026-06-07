@@ -15,10 +15,9 @@ import (
 )
 
 func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
-	imageRef := strings.TrimSpace(r.URL.Query().Get("image"))
-	filePath := strings.TrimSpace(r.URL.Query().Get("path"))
-	if imageRef == "" || filePath == "" {
-		http.Error(w, "image and path query parameters are required", http.StatusBadRequest)
+	imageRef, filePath, err := parseDownloadPath(r.URL.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -50,6 +49,30 @@ func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, file.Reader); err != nil {
 		slog.Warn("download stream interrupted", "image", imageRef, "path", filePath, "error", err)
 	}
+}
+
+func parseDownloadPath(urlPath string) (string, string, error) {
+	const (
+		prefix    = "/download/"
+		separator = "/-/"
+	)
+
+	if !strings.HasPrefix(urlPath, prefix) {
+		return "", "", fmt.Errorf("download path must start with %s", prefix)
+	}
+
+	rest := strings.TrimPrefix(urlPath, prefix)
+	sepIndex := strings.Index(rest, separator)
+	if sepIndex < 0 {
+		return "", "", fmt.Errorf("download path must be /download/<image>/-/<path>")
+	}
+
+	imageRef := strings.TrimSpace(rest[:sepIndex])
+	filePath := strings.TrimSpace(rest[sepIndex+len(separator):])
+	if imageRef == "" || filePath == "" {
+		return "", "", fmt.Errorf("image and path are required")
+	}
+	return imageRef, filePath, nil
 }
 
 func writeDownloadError(w http.ResponseWriter, err error) {
