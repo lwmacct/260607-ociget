@@ -6,7 +6,7 @@ server:
 
   # HTTP 服务配置
   http:
-    listen: ":40238" # HTTP 服务监听地址
+    listen: ":40248" # HTTP 服务监听地址
     ssl-cert-file: "" # SSL 证书文件路径
     ssl-key-file: "" # SSL 密钥文件路径
 

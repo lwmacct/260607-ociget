@@ -51,7 +51,7 @@ func DefaultConfig() Config {
 		Server: Server{
 			Database: ".local/data/app.db",
 			HTTP: ServerHTTP{
-				Listen: ":40238",
+				Listen: ":40248",
 			},
 			Control: ServerControl{
 				Listen: ".local/run/control.sock",

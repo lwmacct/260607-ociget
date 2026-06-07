@@ -171,6 +171,7 @@ func (app *serverApp) buildHTTPServer() error {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"message":"webapp backend is running","api":"/api"}`))
 	})
+	router.Get("/download", app.handleDownload)
 
 	apiRouter := chi.NewRouter()
 	router.Mount("/api", apiRouter)
