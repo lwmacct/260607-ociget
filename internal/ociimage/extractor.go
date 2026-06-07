@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"runtime"
 	"strings"
 	"time"
 
@@ -23,6 +22,11 @@ var (
 )
 
 type Extractor struct{}
+
+type OpenOptions struct {
+	Platform *v1.Platform
+	Insecure bool
+}
 
 type File struct {
 	Path    string
@@ -44,26 +48,13 @@ func (l imageLayer) Open() (io.ReadCloser, error) {
 	return l.layer.Uncompressed()
 }
 
-func (e *Extractor) OpenFile(ctx context.Context, imageRef, filePath string) (*File, error) {
+func (e *Extractor) OpenFile(ctx context.Context, imageRef, filePath string, opts OpenOptions) (*File, error) {
 	target, err := NormalizePath(filePath)
 	if err != nil {
 		return nil, err
 	}
 
-	ref, err := name.ParseReference(imageRef)
-	if err != nil {
-		return nil, fmt.Errorf("parse image reference: %w", err)
-	}
-
-	img, err := remote.Image(
-		ref,
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
-		remote.WithContext(ctx),
-		remote.WithPlatform(v1.Platform{
-			OS:           runtime.GOOS,
-			Architecture: runtime.GOARCH,
-		}),
-	)
+	img, err := e.remoteImage(ctx, imageRef, opts)
 	if err != nil {
 		return nil, fmt.Errorf("pull image metadata: %w", err)
 	}
@@ -78,6 +69,44 @@ func (e *Extractor) OpenFile(ctx context.Context, imageRef, filePath string) (*F
 		openers = append(openers, imageLayer{layer: layer})
 	}
 	return openFileFromLayers(openers, target)
+}
+
+func (e *Extractor) remoteImage(ctx context.Context, imageRef string, opts OpenOptions) (v1.Image, error) {
+	img, err := pullRemoteImage(ctx, imageRef, opts, false)
+	if err == nil || opts.Insecure || !shouldRetryInsecure(err) {
+		return img, err
+	}
+	opts.Insecure = true
+	return pullRemoteImage(ctx, imageRef, opts, true)
+}
+
+func pullRemoteImage(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (v1.Image, error) {
+	nameOpts := []name.Option(nil)
+	if insecure {
+		nameOpts = append(nameOpts, name.Insecure)
+	}
+
+	ref, err := name.ParseReference(imageRef, nameOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("parse image reference: %w", err)
+	}
+
+	remoteOpts := []remote.Option{
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+		remote.WithContext(ctx),
+		remote.WithTransport(realmFixTransport{base: remote.DefaultTransport}),
+	}
+	if opts.Platform != nil {
+		remoteOpts = append(remoteOpts, remote.WithPlatform(*opts.Platform))
+	}
+
+	return remote.Image(ref, remoteOpts...)
+}
+
+func shouldRetryInsecure(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "invalid realm in www-authenticate") &&
+		strings.Contains(msg, `realm scheme "http" not allowed`)
 }
 
 func openFileFromLayers(layers []layerOpener, target string) (*File, error) {

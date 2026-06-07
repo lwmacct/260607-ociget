@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
@@ -21,8 +22,14 @@ func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	openOpts, err := downloadOpenOptions(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	extractor := &ociimage.Extractor{}
-	file, err := extractor.OpenFile(r.Context(), imageRef, filePath)
+	file, err := extractor.OpenFile(r.Context(), imageRef, filePath, openOpts)
 	if err != nil {
 		writeDownloadError(w, err)
 		slog.Warn("download failed", "image", imageRef, "path", filePath, "error", err)
@@ -65,4 +72,40 @@ func headerFilename(name string) string {
 		return "download"
 	}
 	return name
+}
+
+func downloadOpenOptions(r *http.Request) (ociimage.OpenOptions, error) {
+	var opts ociimage.OpenOptions
+
+	platformParam := strings.TrimSpace(r.URL.Query().Get("platform"))
+	if platformParam != "" {
+		platform, err := parsePlatform(platformParam)
+		if err != nil {
+			return opts, err
+		}
+		opts.Platform = &platform
+	}
+
+	insecureParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("insecure")))
+	opts.Insecure = insecureParam == "1" || insecureParam == "true" || insecureParam == "yes"
+	return opts, nil
+}
+
+func parsePlatform(input string) (v1.Platform, error) {
+	parts := strings.Split(input, "/")
+	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {
+		return v1.Platform{}, fmt.Errorf("platform must be os/arch or os/arch/variant")
+	}
+
+	platform := v1.Platform{
+		OS:           parts[0],
+		Architecture: parts[1],
+	}
+	if len(parts) == 3 {
+		if parts[2] == "" {
+			return v1.Platform{}, fmt.Errorf("platform variant is empty")
+		}
+		platform.Variant = parts[2]
+	}
+	return platform, nil
 }
