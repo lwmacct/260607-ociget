@@ -1,0 +1,15 @@
+# 配置示例文件, 复制此文件为 config.yaml 并根据需要修改
+
+# 服务端配置
+server:
+  database: ".local/data/app.db" # SQLite 数据库文件路径
+
+  # HTTP 服务配置
+  http:
+    listen: ":40238" # HTTP 服务监听地址
+    ssl-cert-file: "" # SSL 证书文件路径
+    ssl-key-file: "" # SSL 密钥文件路径
+
+  # 本地控制面配置
+  control:
+    listen: ".local/run/control.sock" # Unix socket path for local control commands

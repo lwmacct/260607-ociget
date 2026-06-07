@@ -1,0 +1,84 @@
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f5f7fb;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-sider {
+  background: #0f172a;
+  padding: 20px 16px;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 20px;
+  color: #fff;
+}
+
+.brand-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff !important;
+}
+
+.nav {
+  background: transparent !important;
+  border-inline-end: 0 !important;
+}
+
+.nav .ant-menu-item,
+.nav .ant-menu-submenu-title {
+  color: rgba(255, 255, 255, 0.82) !important;
+}
+
+.nav .ant-menu-item-selected {
+  background: rgba(22, 119, 255, 0.18) !important;
+  color: #fff !important;
+}
+
+.app-header {
+  height: 64px;
+  background: #fff;
+  border-bottom: 1px solid #e6ebf5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+}
+
+.header-title {
+  margin: 0 !important;
+}
+
+.app-content {
+  padding: 24px;
+}
+
+.loading-state {
+  min-height: calc(100vh - 160px);
+  display: grid;
+  place-items: center;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.wide-card {
+  grid-column: 1 / -1;
+}
+
