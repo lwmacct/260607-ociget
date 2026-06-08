@@ -194,6 +194,7 @@ func (app *serverApp) buildHTTPServer() error {
 	})
 	router.Get("/download", app.handleDownload)
 	router.Get("/download/*", app.handleDownload)
+	router.Post("/download/archive", app.handleDownloadArchive)
 
 	apiRouter := chi.NewRouter()
 	router.Mount("/api", apiRouter)

@@ -22,6 +22,12 @@ type Request struct {
 	Options  Options
 }
 
+type ArchiveRequest struct {
+	ImageRef string
+	Paths    []string
+	Options  Options
+}
+
 type Metadata struct {
 	Path     string
 	Size     int64

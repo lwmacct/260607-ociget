@@ -1,10 +1,13 @@
 package download
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
+	"strings"
 
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
@@ -24,6 +27,51 @@ func (s *Service) Write(ctx context.Context, req Request, dst io.Writer, beforeW
 		}
 	}
 	return s.writeFromImage(ctx, req, dst, beforeWrite, nil)
+}
+
+func (s *Service) WriteArchive(ctx context.Context, req ArchiveRequest, dst io.Writer) error {
+	tw := tar.NewWriter(dst)
+	defer tw.Close()
+
+	seen := map[string]struct{}{}
+	archiveStarted := false
+	for _, filePath := range req.Paths {
+		name := archiveEntryName(filePath)
+		if name == "" {
+			if archiveStarted {
+				return fmt.Errorf("%w: invalid path", ErrWriterStarted)
+			}
+			return ociimage.ErrInvalidPath
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+
+		fileReq := Request{
+			ImageRef: req.ImageRef,
+			FilePath: filePath,
+			Options:  req.Options,
+		}
+		var meta Metadata
+		entry := &tarEntryWriter{writer: tw, name: name, metadata: &meta}
+		if err := s.Write(ctx, fileReq, entry, func(next Metadata) {
+			meta = next
+		}); err != nil {
+			if archiveStarted || entry.started {
+				return fmt.Errorf("%w: %v", ErrWriterStarted, err)
+			}
+			return err
+		}
+		if err := entry.ensureHeader(); err != nil {
+			if archiveStarted || entry.started {
+				return fmt.Errorf("%w: %v", ErrWriterStarted, err)
+			}
+			return err
+		}
+		archiveStarted = true
+	}
+	return nil
 }
 
 func (s *Service) writeCached(ctx context.Context, req Request, dst io.Writer, beforeWrite func(Metadata)) (bool, error) {
@@ -74,6 +122,59 @@ func (s *Service) writeCached(ctx context.Context, req Request, dst io.Writer, b
 		return true, fmt.Errorf("%w: %v", ErrWriterStarted, err)
 	}
 	return true, nil
+}
+
+type tarEntryWriter struct {
+	writer   *tar.Writer
+	name     string
+	metadata *Metadata
+	started  bool
+}
+
+func (w *tarEntryWriter) Write(p []byte) (int, error) {
+	if err := w.ensureHeader(); err != nil {
+		return 0, err
+	}
+	return w.writer.Write(p)
+}
+
+func (w *tarEntryWriter) ensureHeader() error {
+	if w.started {
+		return nil
+	}
+	meta := Metadata{}
+	if w.metadata != nil {
+		meta = *w.metadata
+	}
+	name := w.name
+	if fromMeta := archiveEntryName(meta.Path); fromMeta != "" {
+		name = fromMeta
+	}
+	if name == "" {
+		return ociimage.ErrInvalidPath
+	}
+	if err := w.writer.WriteHeader(&tar.Header{
+		Name:    name,
+		Mode:    0o644,
+		Size:    meta.Size,
+		ModTime: meta.ModTime,
+	}); err != nil {
+		return err
+	}
+	w.started = true
+	return nil
+}
+
+func archiveEntryName(filePath string) string {
+	target, err := ociimage.NormalizePath(filePath)
+	if err != nil {
+		return ""
+	}
+	target = path.Clean(target)
+	if target == "." || target == "/" {
+		return ""
+	}
+	return strings.TrimPrefix(target, "/")
 }
 
 func (s *Service) writeFromImage(ctx context.Context, req Request, dst io.Writer, beforeWrite func(Metadata), cacheWriter *cacheWriter) error {

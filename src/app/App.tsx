@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { Key } from "react";
 import {
   Alert,
   Breadcrumb,
@@ -119,6 +120,28 @@ function downloadHref(imageRef: string, path: string, platform: string, insecure
   return `/download?${query.toString()}`;
 }
 
+async function downloadBlob(url: string, body: unknown, filename: string) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const message = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(message.trim() || `HTTP ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
+
 function platformValue(platform: ImagePlatform) {
   return [platform.os, platform.architecture, platform.variant].filter(Boolean).join("/");
 }
@@ -138,8 +161,10 @@ export default function App() {
   const [insecure, setInsecure] = useState(false);
   const [path, setPath] = useState("/");
   const [directory, setDirectory] = useState<DirectoryResponse | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [platformOptions, setPlatformOptions] = useState<string[]>([defaultPlatform]);
   const [loading, setLoading] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
   const [platformLoading, setPlatformLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [platformError, setPlatformError] = useState<string | null>(null);
@@ -179,10 +204,33 @@ export default function App() {
         path: normalizePath(data.path),
       });
       setDirectory(data);
+      setSelectedPaths([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load image directory");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadSelected = async () => {
+    if (selectedPaths.length === 0) return;
+    setArchiveLoading(true);
+    setError(null);
+    try {
+      await downloadBlob(
+        "/download/archive",
+        {
+          ref: imageRef,
+          paths: selectedPaths,
+          platform,
+          insecure,
+        },
+        "image-files.tar",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to download selected files");
+    } finally {
+      setArchiveLoading(false);
     }
   };
 
@@ -299,6 +347,15 @@ export default function App() {
     },
   ];
 
+  const rowSelection = {
+    selectedRowKeys: selectedPaths,
+    onChange: (keys: Key[]) => setSelectedPaths(keys.map(String)),
+    getCheckboxProps: (entry: ImageEntry) => ({
+      disabled: entry.type !== "file",
+      name: entry.name,
+    }),
+  };
+
   return (
     <Layout className="app-shell">
       <Layout.Header className="app-header">
@@ -380,6 +437,19 @@ export default function App() {
             <Space size={8} className="path-actions">
               <Tag>{imageRef}</Tag>
               {platform ? <Tag>{platform}</Tag> : null}
+              {selectedPaths.length > 0 ? (
+                <>
+                  <Tag>{selectedPaths.length} selected</Tag>
+                  <Button
+                    icon={<DownloadOutlined />}
+                    loading={archiveLoading}
+                    size="small"
+                    onClick={() => void downloadSelected()}
+                  >
+                    Download
+                  </Button>
+                </>
+              ) : null}
               <Button disabled={path === "/"} size="small" onClick={() => void loadDirectory(parentPath(path))}>
                 Up
               </Button>
@@ -395,6 +465,7 @@ export default function App() {
               emptyText: directory ? <Empty description="Empty directory" /> : <Empty description="Browse an image" />,
             }}
             pagination={false}
+            rowSelection={rowSelection}
             rowKey={(entry) => entry.path}
             scroll={{ x: 860 }}
             size="middle"

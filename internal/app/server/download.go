@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,13 @@ import (
 	"github.com/lwmacct/260607-ociget/internal/download"
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
+
+type downloadArchiveInput struct {
+	Ref      string   `json:"ref"`
+	Paths    []string `json:"paths"`
+	Platform string   `json:"platform,omitempty"`
+	Insecure bool     `json:"insecure,omitempty"`
+}
 
 func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 	imageRef, filePath, err := downloadTarget(r)
@@ -26,14 +34,10 @@ func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	service := app.downloads
-	if service == nil {
-		var err error
-		service, err = download.NewService(download.CacheConfig{})
-		if err != nil {
-			http.Error(w, "failed to initialize downloader", http.StatusInternalServerError)
-			return
-		}
+	service, err := app.downloadService()
+	if err != nil {
+		http.Error(w, "failed to initialize downloader", http.StatusInternalServerError)
+		return
 	}
 
 	req := download.Request{
@@ -53,11 +57,72 @@ func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (app *serverApp) handleDownloadArchive(w http.ResponseWriter, r *http.Request) {
+	var input downloadArchiveInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid archive request", http.StatusBadRequest)
+		return
+	}
+	input.Ref = strings.TrimSpace(input.Ref)
+	if input.Ref == "" || len(input.Paths) == 0 {
+		http.Error(w, "image and paths are required", http.StatusBadRequest)
+		return
+	}
+
+	opts, err := archiveOptions(input)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	service, err := app.downloadService()
+	if err != nil {
+		http.Error(w, "failed to initialize downloader", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-tar")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, download.HeaderFilename("image-files.tar")))
+	err = service.WriteArchive(r.Context(), download.ArchiveRequest{
+		ImageRef: input.Ref,
+		Paths:    input.Paths,
+		Options:  opts,
+	}, w)
+	if err != nil && !errors.Is(err, download.ErrWriterStarted) {
+		writeDownloadError(w, err)
+		slog.Warn("archive download failed", "image", input.Ref, "paths", len(input.Paths), "error", err)
+	}
+	if errors.Is(err, download.ErrWriterStarted) {
+		slog.Warn("archive download stream interrupted", "image", input.Ref, "paths", len(input.Paths), "error", err)
+	}
+}
+
 func downloadTarget(r *http.Request) (string, string, error) {
 	if strings.TrimSpace(r.URL.Query().Get("ref")) != "" || strings.TrimSpace(r.URL.Query().Get("path")) != "" {
 		return download.ParseQuery(r.URL.Query())
 	}
 	return download.ParsePath(r.URL.Path)
+}
+
+func archiveOptions(input downloadArchiveInput) (download.Options, error) {
+	var opts download.Options
+	platformParam := strings.TrimSpace(input.Platform)
+	if platformParam != "" {
+		platform, err := download.ParsePlatform(platformParam)
+		if err != nil {
+			return opts, err
+		}
+		opts.Platform = &platform
+	}
+	opts.Insecure = input.Insecure
+	return opts, nil
+}
+
+func (app *serverApp) downloadService() (*download.Service, error) {
+	if app.downloads != nil {
+		return app.downloads, nil
+	}
+	return download.NewService(download.CacheConfig{})
 }
 
 func (app *serverApp) writeDownloadHeaders(w http.ResponseWriter, filename string, size int64, modTime time.Time) {
