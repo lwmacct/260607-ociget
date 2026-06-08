@@ -2,83 +2,223 @@ html,
 body,
 #root {
   width: 100%;
-  height: 100%;
+  min-width: 0;
+  min-height: 100%;
   margin: 0;
 }
 
 body {
-  background: #f5f7fb;
+  background: #f3f5f8;
+}
+
+button,
+input {
+  letter-spacing: 0;
 }
 
 .app-shell {
   min-height: 100vh;
-}
-
-.app-sider {
-  background: #0f172a;
-  padding: 20px 16px;
-}
-
-.brand {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 20px;
-  color: #fff;
-}
-
-.brand-label {
-  font-size: 16px;
-  font-weight: 600;
-  color: #fff !important;
-}
-
-.nav {
-  background: transparent !important;
-  border-inline-end: 0 !important;
-}
-
-.nav .ant-menu-item,
-.nav .ant-menu-submenu-title {
-  color: rgba(255, 255, 255, 0.82) !important;
-}
-
-.nav .ant-menu-item-selected {
-  background: rgba(22, 119, 255, 0.18) !important;
-  color: #fff !important;
+  background: #f3f5f8;
 }
 
 .app-header {
-  height: 64px;
-  background: #fff;
-  border-bottom: 1px solid #e6ebf5;
+  height: 56px;
+  padding: 0 24px;
+  background: #1f2933;
+  border-bottom: 1px solid #111827;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
 }
 
-.header-title {
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #ffffff;
+  min-width: 0;
+}
+
+.brand-title {
+  color: #ffffff !important;
   margin: 0 !important;
+  font-size: 18px !important;
+  line-height: 1.2 !important;
 }
 
 .app-content {
-  padding: 24px;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 24px 28px;
 }
 
-.loading-state {
-  min-height: calc(100vh - 160px);
+.query-bar,
+.browser-panel {
+  background: #ffffff;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+}
+
+.query-bar {
+  padding: 16px 16px 4px;
+}
+
+.query-form {
   display: grid;
-  place-items: center;
+  grid-template-columns: minmax(280px, 1fr) minmax(180px, 240px) 160px auto;
+  gap: 12px;
+  align-items: end;
 }
 
-.panel-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+.query-form .ant-form-item {
+  margin-bottom: 12px;
 }
 
-.wide-card {
-  grid-column: 1 / -1;
+.check-item,
+.submit-item {
+  min-height: 56px;
+  display: flex;
+  align-items: end;
 }
 
+.error-alert {
+  margin-top: 14px;
+}
+
+.browser-panel {
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.browser-toolbar {
+  min-height: 52px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e4eaf1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.breadcrumb-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1677ff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.breadcrumb-button:hover {
+  text-decoration: underline;
+}
+
+.path-actions {
+  max-width: 60%;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.path-actions .ant-tag {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-table .ant-table {
+  border-radius: 0;
+}
+
+.entry-name {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f2933;
+  text-align: left;
+  font: inherit;
+}
+
+.entry-name.clickable {
+  color: #1677ff;
+  cursor: pointer;
+}
+
+.entry-name.clickable:hover span:first-of-type {
+  text-decoration: underline;
+}
+
+.entry-name > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.entry-icon.directory {
+  color: #c38b00;
+}
+
+.entry-icon.file {
+  color: #64748b;
+}
+
+.link-target {
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .app-content {
+    padding: 14px;
+  }
+
+  .query-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .submit-item {
+    justify-content: flex-start;
+  }
+
+  .browser-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .path-actions {
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-header {
+    padding: 0 14px;
+  }
+
+  .brand-title {
+    font-size: 16px !important;
+  }
+
+  .query-form {
+    grid-template-columns: 1fr;
+  }
+
+  .check-item,
+  .submit-item {
+    min-height: auto;
+  }
+}
