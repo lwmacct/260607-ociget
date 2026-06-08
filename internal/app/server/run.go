@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/lwmacct/251207-go-pkg-version/pkg/version"
 	"github.com/lwmacct/260607-ociget/internal/config"
+	"github.com/lwmacct/260607-ociget/internal/download"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/driver/sqliteshim"
@@ -43,7 +44,7 @@ type serverApp struct {
 	srv        *http.Server
 	tlsManager *TLSManager
 	control    *controlPlane
-	cache      *downloadCache
+	downloads  *download.Service
 }
 
 func (app *serverApp) run(ctx context.Context) error {
@@ -167,11 +168,19 @@ func serveHTTP(srv *http.Server, cfg *config.Config) error {
 }
 
 func (app *serverApp) buildHTTPServer() error {
-	cache, err := newDownloadCache(app.cfg.Server.DownloadCache)
+	cacheTTL, err := app.cfg.Server.DownloadCache.TTLDuration()
 	if err != nil {
 		return err
 	}
-	app.cache = cache
+	downloads, err := download.NewService(download.CacheConfig{
+		Enabled: app.cfg.Server.DownloadCache.Enabled,
+		Dir:     app.cfg.Server.DownloadCache.Dir,
+		TTL:     cacheTTL,
+	})
+	if err != nil {
+		return err
+	}
+	app.downloads = downloads
 
 	router := chi.NewRouter()
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {

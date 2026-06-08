@@ -1,4 +1,4 @@
-package server
+package download
 
 import (
 	"errors"
@@ -8,22 +8,20 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/lwmacct/260607-ociget/internal/config"
 )
 
-func TestNewDownloadCacheDisabled(t *testing.T) {
-	cache, err := newDownloadCache(config.ServerDownloadCache{Enabled: false})
+func TestNewCacheDisabled(t *testing.T) {
+	cache, err := newCache(CacheConfig{Enabled: false})
 	if err != nil {
-		t.Fatalf("newDownloadCache() unexpected error: %v", err)
+		t.Fatalf("newCache() unexpected error: %v", err)
 	}
 	if cache != nil {
-		t.Fatalf("newDownloadCache() = %v, want nil", cache)
+		t.Fatalf("newCache() = %v, want nil", cache)
 	}
 }
 
-func TestDownloadCacheWriterCommitAndGet(t *testing.T) {
-	cache := testDownloadCache(t, 0)
+func TestCacheWriterCommitAndGet(t *testing.T) {
+	cache := testCache(t, 0)
 	key := testCacheKey()
 	modTime := time.Now().Add(-time.Hour).Truncate(time.Second)
 
@@ -51,8 +49,8 @@ func TestDownloadCacheWriterCommitAndGet(t *testing.T) {
 	}
 }
 
-func TestDownloadCacheWriterAbortRemovesTempFile(t *testing.T) {
-	cache := testDownloadCache(t, 0)
+func TestCacheWriterAbortRemovesTempFile(t *testing.T) {
+	cache := testCache(t, 0)
 	writer, err := cache.writer(testCacheKey())
 	if err != nil {
 		t.Fatalf("writer() unexpected error: %v", err)
@@ -69,8 +67,8 @@ func TestDownloadCacheWriterAbortRemovesTempFile(t *testing.T) {
 	}
 }
 
-func TestDownloadCacheTTL(t *testing.T) {
-	cache := testDownloadCache(t, time.Hour)
+func TestCacheTTL(t *testing.T) {
+	cache := testCache(t, time.Hour)
 	key := testCacheKey()
 	path := cache.pathForKey(key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -89,8 +87,8 @@ func TestDownloadCacheTTL(t *testing.T) {
 	}
 }
 
-func TestDownloadCacheServe(t *testing.T) {
-	cache := testDownloadCache(t, 0)
+func TestCacheOpen(t *testing.T) {
+	cache := testCache(t, 0)
 	key := testCacheKey()
 	writer, err := cache.writer(key)
 	if err != nil {
@@ -102,25 +100,26 @@ func TestDownloadCacheServe(t *testing.T) {
 	if err := writer.Commit(time.Now()); err != nil {
 		t.Fatalf("Commit() unexpected error: %v", err)
 	}
-	cached, err := cache.get(key)
-	if err != nil {
-		t.Fatalf("get() unexpected error: %v", err)
-	}
 
+	file, cached, err := cache.open(key)
+	if err != nil {
+		t.Fatalf("open() unexpected error: %v", err)
+	}
+	defer file.Close()
+	if cached.size != 7 {
+		t.Fatalf("size = %d, want 7", cached.size)
+	}
 	rec := httptest.NewRecorder()
-	if err := cache.serve(rec, cached); err != nil {
-		t.Fatalf("serve() unexpected error: %v", err)
+	if _, err := rec.Body.ReadFrom(file); err != nil {
+		t.Fatalf("ReadFrom() unexpected error: %v", err)
 	}
 	if rec.Body.String() != "payload" {
 		t.Fatalf("body = %q, want payload", rec.Body.String())
 	}
-	if rec.Header().Get("Content-Length") != "7" {
-		t.Fatalf("Content-Length = %q, want 7", rec.Header().Get("Content-Length"))
-	}
 }
 
-func TestDownloadCacheDoSuppressesDuplicateExtraction(t *testing.T) {
-	cache := testDownloadCache(t, 0)
+func TestCacheDoSuppressesDuplicateExtraction(t *testing.T) {
+	cache := testCache(t, 0)
 	key := testCacheKey()
 
 	started := make(chan struct{})
@@ -128,7 +127,7 @@ func TestDownloadCacheDoSuppressesDuplicateExtraction(t *testing.T) {
 	var calls int
 	var mu sync.Mutex
 
-	fn := func() (*cacheExtractResult, error) {
+	fn := func() (*cacheResult, error) {
 		mu.Lock()
 		calls++
 		mu.Unlock()
@@ -148,7 +147,7 @@ func TestDownloadCacheDoSuppressesDuplicateExtraction(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &cacheExtractResult{cached: cached, streamed: true}, nil
+		return &cacheResult{cached: cached, written: true}, nil
 	}
 
 	var wg sync.WaitGroup
@@ -179,10 +178,10 @@ func TestDownloadCacheDoSuppressesDuplicateExtraction(t *testing.T) {
 	}
 }
 
-func testDownloadCache(t *testing.T, ttl time.Duration) *downloadCache {
+func testCache(t *testing.T, ttl time.Duration) *cache {
 	t.Helper()
 
-	return &downloadCache{
+	return &cache{
 		dir: t.TempDir(),
 		ttl: ttl,
 	}

@@ -1,4 +1,4 @@
-package server
+package download
 
 import (
 	"context"
@@ -6,33 +6,29 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/lwmacct/260607-ociget/internal/config"
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 	"golang.org/x/sync/singleflight"
 )
 
-type downloadCache struct {
+type cache struct {
 	dir string
 	ttl time.Duration
 	sf  singleflight.Group
 }
 
-type cachedDownload struct {
+type cachedFile struct {
 	path    string
 	size    int64
 	modTime time.Time
 }
 
-type cacheExtractResult struct {
-	cached   *cachedDownload
-	streamed bool
+type cacheResult struct {
+	cached  *cachedFile
+	written bool
 }
 
 type cacheWriter struct {
@@ -43,51 +39,50 @@ type cacheWriter struct {
 	committed bool
 }
 
-func newDownloadCache(cfg config.ServerDownloadCache) (*downloadCache, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
+func newCache(cfg CacheConfig) (*cache, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	ttl, err := cfg.TTLDuration()
-	if err != nil {
-		return nil, err
+	if cfg.Dir == "" {
+		return nil, fmt.Errorf("download cache dir is required when enabled")
+	}
+	if cfg.TTL < 0 {
+		return nil, fmt.Errorf("download cache ttl must not be negative")
 	}
 	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("prepare download cache directory: %w", err)
 	}
-	return &downloadCache{dir: cfg.Dir, ttl: ttl}, nil
+	return &cache{dir: cfg.Dir, ttl: cfg.TTL}, nil
 }
 
-func (c *downloadCache) key(ctx context.Context, imageRef, filePath string, opts ociimage.OpenOptions) (string, error) {
+func (c *cache) key(ctx context.Context, req Request) (string, error) {
 	if c == nil {
 		return "", os.ErrNotExist
 	}
-	target, err := ociimage.NormalizePath(filePath)
+	target, err := ociimage.NormalizePath(req.FilePath)
 	if err != nil {
 		return "", err
 	}
 
 	extractor := &ociimage.Extractor{}
-	digest, err := extractor.ImageDigest(ctx, imageRef, opts)
+	digest, err := extractor.ImageDigest(ctx, req.ImageRef, ociOptions(req.Options))
 	if err != nil {
 		return "", err
 	}
 
 	platform := "default"
-	if opts.Platform != nil {
-		platform = platformString(*opts.Platform)
+	if req.Options.Platform != nil {
+		platform = platformString(*req.Options.Platform)
 	}
 	sum := sha256.Sum256([]byte(digest.String() + "\n" + platform + "\n" + target))
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (c *downloadCache) do(key string, fn func() (*cacheExtractResult, error)) (*cacheExtractResult, bool, error) {
+func (c *cache) do(key string, fn func() (*cacheResult, error)) (*cacheResult, bool, error) {
 	executed := false
 	v, err, shared := c.sf.Do(key, func() (any, error) {
 		if cached, err := c.get(key); err == nil {
-			return &cacheExtractResult{cached: cached}, nil
+			return &cacheResult{cached: cached}, nil
 		}
 		executed = true
 		return fn()
@@ -95,10 +90,10 @@ func (c *downloadCache) do(key string, fn func() (*cacheExtractResult, error)) (
 	if err != nil {
 		return nil, shared, err
 	}
-	return v.(*cacheExtractResult), executed, nil
+	return v.(*cacheResult), executed, nil
 }
 
-func (c *downloadCache) get(key string) (*cachedDownload, error) {
+func (c *cache) get(key string) (*cachedFile, error) {
 	if c == nil {
 		return nil, os.ErrNotExist
 	}
@@ -109,7 +104,7 @@ func (c *downloadCache) get(key string) (*cachedDownload, error) {
 	return c.stat(path)
 }
 
-func (c *downloadCache) writer(key string) (*cacheWriter, error) {
+func (c *cache) writer(key string) (*cacheWriter, error) {
 	finalPath := c.pathForKey(key)
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o700); err != nil {
 		return nil, fmt.Errorf("prepare download cache shard: %w", err)
@@ -125,27 +120,23 @@ func (c *downloadCache) writer(key string) (*cacheWriter, error) {
 	}, nil
 }
 
-func (c *downloadCache) serve(w http.ResponseWriter, cached *cachedDownload) error {
-	f, err := os.Open(cached.path)
+func (c *cache) open(key string) (*os.File, *cachedFile, error) {
+	cached, err := c.get(key)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer f.Close()
-	if cached.size >= 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", cached.size))
+	file, err := os.Open(cached.path)
+	if err != nil {
+		return nil, nil, err
 	}
-	if !cached.modTime.IsZero() {
-		w.Header().Set("Last-Modified", cached.modTime.UTC().Format(http.TimeFormat))
-	}
-	_, err = io.Copy(w, f)
-	return err
+	return file, cached, nil
 }
 
-func (c *downloadCache) pathForKey(key string) string {
+func (c *cache) pathForKey(key string) string {
 	return filepath.Join(c.dir, key[:2], key[2:])
 }
 
-func (c *downloadCache) isFresh(path string) bool {
+func (c *cache) isFresh(path string) bool {
 	st, err := os.Stat(path)
 	if err != nil || !st.Mode().IsRegular() {
 		return false
@@ -156,7 +147,7 @@ func (c *downloadCache) isFresh(path string) bool {
 	return time.Since(st.ModTime()) <= c.ttl
 }
 
-func (c *downloadCache) stat(path string) (*cachedDownload, error) {
+func (c *cache) stat(path string) (*cachedFile, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -164,7 +155,7 @@ func (c *downloadCache) stat(path string) (*cachedDownload, error) {
 	if !st.Mode().IsRegular() {
 		return nil, os.ErrNotExist
 	}
-	return &cachedDownload{
+	return &cachedFile{
 		path:    path,
 		size:    st.Size(),
 		modTime: st.ModTime(),
@@ -221,18 +212,4 @@ func (w *cacheWriter) Abort() {
 	if w.tmpPath != "" {
 		_ = os.Remove(w.tmpPath)
 	}
-}
-
-func platformString(p v1.Platform) string {
-	parts := []string{p.OS, p.Architecture}
-	if p.Variant != "" {
-		parts = append(parts, p.Variant)
-	}
-	if p.OSVersion != "" {
-		parts = append(parts, p.OSVersion)
-	}
-	if len(p.OSFeatures) > 0 {
-		parts = append(parts, strings.Join(p.OSFeatures, ","))
-	}
-	return strings.Join(parts, "/")
 }
