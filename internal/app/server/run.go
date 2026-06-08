@@ -43,6 +43,7 @@ type serverApp struct {
 	srv        *http.Server
 	tlsManager *TLSManager
 	control    *controlPlane
+	cache      *downloadCache
 }
 
 func (app *serverApp) run(ctx context.Context) error {
@@ -166,6 +167,12 @@ func serveHTTP(srv *http.Server, cfg *config.Config) error {
 }
 
 func (app *serverApp) buildHTTPServer() error {
+	cache, err := newDownloadCache(app.cfg.Server.DownloadCache)
+	if err != nil {
+		return err
+	}
+	app.cache = cache
+
 	router := chi.NewRouter()
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

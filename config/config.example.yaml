@@ -13,3 +13,9 @@ server:
   # 本地控制面配置
   control:
     listen: ".local/run/control.sock" # Unix socket path for local control commands
+
+  # 下载文件缓存配置
+  download-cache:
+    enabled: true # 是否启用下载文件缓存
+    dir: ".local/cache/downloads" # 下载文件缓存目录
+    ttl: "168h" # 下载文件缓存有效期, 例如 168h

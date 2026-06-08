@@ -71,6 +71,18 @@ func (e *Extractor) OpenFile(ctx context.Context, imageRef, filePath string, opt
 	return openFileFromLayers(openers, target)
 }
 
+func (e *Extractor) ImageDigest(ctx context.Context, imageRef string, opts OpenOptions) (v1.Hash, error) {
+	img, err := e.remoteImage(ctx, imageRef, opts)
+	if err != nil {
+		return v1.Hash{}, fmt.Errorf("pull image metadata: %w", err)
+	}
+	digest, err := img.Digest()
+	if err != nil {
+		return v1.Hash{}, fmt.Errorf("read image digest: %w", err)
+	}
+	return digest, nil
+}
+
 func (e *Extractor) remoteImage(ctx context.Context, imageRef string, opts OpenOptions) (v1.Image, error) {
 	img, err := pullRemoteImage(ctx, imageRef, opts, false)
 	if err == nil || opts.Insecure || !shouldRetryInsecure(err) {

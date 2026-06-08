@@ -60,6 +60,21 @@ func serverCommand() *cli.Command {
 				Usage: "Unix socket 控制面监听地址",
 				Value: defaults.Server.Control.Listen,
 			},
+			&cli.BoolFlag{
+				Name:  "download-cache.enabled",
+				Usage: "启用下载文件缓存",
+				Value: defaults.Server.DownloadCache.Enabled,
+			},
+			&cli.StringFlag{
+				Name:  "download-cache.dir",
+				Usage: "下载文件缓存目录",
+				Value: defaults.Server.DownloadCache.Dir,
+			},
+			&cli.StringFlag{
+				Name:  "download-cache.ttl",
+				Usage: "下载文件缓存有效期, 例如 168h",
+				Value: defaults.Server.DownloadCache.TTL,
+			},
 		},
 	}
 }
