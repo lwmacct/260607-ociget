@@ -21,6 +21,7 @@ import (
 	"github.com/lwmacct/251207-go-pkg-version/pkg/version"
 	"github.com/lwmacct/260607-ociget/internal/config"
 	"github.com/lwmacct/260607-ociget/internal/download"
+	"github.com/lwmacct/260607-ociget/internal/imagebrowser"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/driver/sqliteshim"
@@ -45,6 +46,7 @@ type serverApp struct {
 	tlsManager *TLSManager
 	control    *controlPlane
 	downloads  *download.Service
+	browser    *imagebrowser.Browser
 }
 
 func (app *serverApp) run(ctx context.Context) error {
@@ -113,7 +115,7 @@ type metaOutput struct {
 	}
 }
 
-func registerRoutes(api huma.API, db *bun.DB, cfg *config.Config) {
+func registerRoutes(api huma.API, db *bun.DB, cfg *config.Config, browser *imagebrowser.Browser) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-health",
 		Method:      http.MethodGet,
@@ -152,6 +154,8 @@ func registerRoutes(api huma.API, db *bun.DB, cfg *config.Config) {
 		out.Body.DocsPath = "/api"
 		return out, nil
 	})
+
+	registerImageRoutes(api, browser)
 }
 
 func serveHTTP(srv *http.Server, cfg *config.Config) error {
@@ -181,6 +185,7 @@ func (app *serverApp) buildHTTPServer() error {
 		return err
 	}
 	app.downloads = downloads
+	app.browser = &imagebrowser.Browser{}
 
 	router := chi.NewRouter()
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +199,7 @@ func (app *serverApp) buildHTTPServer() error {
 	router.Mount("/api", apiRouter)
 
 	api := humachi.New(apiRouter, huma.DefaultConfig("Web App Skeleton", version.AppVersion))
-	registerRoutes(api, app.db, app.cfg)
+	registerRoutes(api, app.db, app.cfg, app.browser)
 
 	app.srv = &http.Server{
 		Addr:              app.cfg.Server.HTTP.Listen,

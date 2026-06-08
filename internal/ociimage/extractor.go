@@ -48,6 +48,10 @@ func (l imageLayer) Open() (io.ReadCloser, error) {
 	return l.layer.Uncompressed()
 }
 
+func (e *Extractor) Image(ctx context.Context, imageRef string, opts OpenOptions) (v1.Image, error) {
+	return e.remoteImage(ctx, imageRef, opts)
+}
+
 func (e *Extractor) OpenFile(ctx context.Context, imageRef, filePath string, opts OpenOptions) (*File, error) {
 	target, err := NormalizePath(filePath)
 	if err != nil {
