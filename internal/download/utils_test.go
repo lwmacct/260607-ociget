@@ -1,6 +1,9 @@
 package download
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+)
 
 func TestParsePath(t *testing.T) {
 	tests := []struct {
@@ -68,6 +71,28 @@ func TestParsePath(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestParseQuery(t *testing.T) {
+	values := url.Values{}
+	values.Set("ref", "ghcr.io/lwmacct/image:tag")
+	values.Set("path", "/usr/local/bin/app")
+
+	gotImage, gotPath, err := ParseQuery(values)
+	if err != nil {
+		t.Fatalf("ParseQuery() unexpected error: %v", err)
+	}
+	if gotImage != "ghcr.io/lwmacct/image:tag" || gotPath != "/usr/local/bin/app" {
+		t.Fatalf("ParseQuery() = (%q, %q), want (%q, %q)",
+			gotImage, gotPath, "ghcr.io/lwmacct/image:tag", "/usr/local/bin/app",
+		)
+	}
+}
+
+func TestParseQueryRejectsMissingTarget(t *testing.T) {
+	if _, _, err := ParseQuery(url.Values{"ref": []string{"alpine:latest"}}); err == nil {
+		t.Fatalf("ParseQuery() expected error")
 	}
 }
 

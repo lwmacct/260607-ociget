@@ -1,10 +1,12 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
 var ErrWriterStarted = errors.New("download writer already received data")
@@ -34,5 +36,11 @@ type CacheConfig struct {
 }
 
 type Service struct {
-	cache *cache
+	cache  *cache
+	images imageSource
+}
+
+type imageSource interface {
+	OpenFile(ctx context.Context, imageRef, filePath string, opts ociimage.OpenOptions) (*ociimage.File, error)
+	ImageDigest(ctx context.Context, imageRef string, opts ociimage.OpenOptions) (v1.Hash, error)
 }

@@ -55,7 +55,7 @@ func newCache(cfg CacheConfig) (*cache, error) {
 	return &cache{dir: cfg.Dir, ttl: cfg.TTL}, nil
 }
 
-func (c *cache) key(ctx context.Context, req Request) (string, error) {
+func (c *cache) key(ctx context.Context, images imageSource, req Request) (string, error) {
 	if c == nil {
 		return "", os.ErrNotExist
 	}
@@ -64,8 +64,7 @@ func (c *cache) key(ctx context.Context, req Request) (string, error) {
 		return "", err
 	}
 
-	extractor := &ociimage.Extractor{}
-	digest, err := extractor.ImageDigest(ctx, req.ImageRef, ociOptions(req.Options))
+	digest, err := images.ImageDigest(ctx, req.ImageRef, ociOptions(req.Options))
 	if err != nil {
 		return "", err
 	}

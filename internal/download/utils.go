@@ -2,6 +2,7 @@ package download
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -26,6 +27,15 @@ func ParsePath(urlPath string) (string, string, error) {
 
 	imageRef := strings.TrimSpace(rest[:sepIndex])
 	filePath := strings.TrimSpace(rest[sepIndex+len(separator):])
+	if imageRef == "" || filePath == "" {
+		return "", "", fmt.Errorf("image and path are required")
+	}
+	return imageRef, filePath, nil
+}
+
+func ParseQuery(values url.Values) (string, string, error) {
+	imageRef := strings.TrimSpace(values.Get("ref"))
+	filePath := strings.TrimSpace(values.Get("path"))
 	if imageRef == "" || filePath == "" {
 		return "", "", fmt.Errorf("image and path are required")
 	}

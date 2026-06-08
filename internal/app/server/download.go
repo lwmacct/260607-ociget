@@ -14,7 +14,7 @@ import (
 )
 
 func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
-	imageRef, filePath, err := download.ParsePath(r.URL.Path)
+	imageRef, filePath, err := downloadTarget(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -51,6 +51,13 @@ func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, download.ErrWriterStarted) {
 		slog.Warn("download stream interrupted", "image", imageRef, "path", filePath, "error", err)
 	}
+}
+
+func downloadTarget(r *http.Request) (string, string, error) {
+	if strings.TrimSpace(r.URL.Query().Get("ref")) != "" || strings.TrimSpace(r.URL.Query().Get("path")) != "" {
+		return download.ParseQuery(r.URL.Query())
+	}
+	return download.ParsePath(r.URL.Path)
 }
 
 func (app *serverApp) writeDownloadHeaders(w http.ResponseWriter, filename string, size int64, modTime time.Time) {

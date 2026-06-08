@@ -110,11 +110,13 @@ function entryIcon(type: EntryType) {
 }
 
 function downloadHref(imageRef: string, path: string, platform: string, insecure: boolean) {
-  const query = new URLSearchParams();
+  const query = new URLSearchParams({
+    ref: imageRef.trim(),
+    path: normalizePath(path),
+  });
   if (platform.trim()) query.set("platform", platform.trim());
   if (insecure) query.set("insecure", "true");
-  const suffix = query.toString();
-  return `/download/${imageRef}/-/${path}${suffix ? `?${suffix}` : ""}`;
+  return `/download?${query.toString()}`;
 }
 
 function platformValue(platform: ImagePlatform) {
@@ -130,6 +132,7 @@ function choosePlatform(platforms: ImagePlatform[], current: string) {
 
 export default function App() {
   const [form] = Form.useForm<BrowseForm>();
+  const formValues = Form.useWatch([], form);
   const [imageRef, setImageRef] = useState(defaultImage);
   const [platform, setPlatform] = useState(defaultPlatform);
   const [insecure, setInsecure] = useState(false);
@@ -169,7 +172,12 @@ export default function App() {
       setPlatform(nextPlatform);
       setInsecure(nextInsecure);
       setPath(normalizePath(data.path));
-      form.setFieldsValue({ imageRef: nextImage, platform: nextPlatform, insecure: nextInsecure, path: normalizePath(data.path) });
+      form.setFieldsValue({
+        imageRef: nextImage,
+        platform: nextPlatform,
+        insecure: nextInsecure,
+        path: normalizePath(data.path),
+      });
       setDirectory(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load image directory");
@@ -220,6 +228,13 @@ export default function App() {
       })),
     ];
   }, [path]);
+
+  const currentDownloadHref = downloadHref(
+    formValues?.imageRef || imageRef,
+    formValues?.path || path,
+    formValues?.platform || platform,
+    formValues?.insecure ?? insecure,
+  );
 
   const columns: ColumnsType<ImageEntry> = [
     {
@@ -339,6 +354,9 @@ export default function App() {
                   <Button loading={platformLoading} onClick={() => void loadPlatforms()}>
                     Platforms
                   </Button>
+                </Tooltip>
+                <Tooltip title="Download current path">
+                  <Button href={currentDownloadHref} icon={<DownloadOutlined />} />
                 </Tooltip>
               </Space>
             </Form.Item>

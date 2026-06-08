@@ -14,7 +14,7 @@ func NewService(cacheConfig CacheConfig) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cache: cache}, nil
+	return &Service{cache: cache, images: &ociimage.Extractor{}}, nil
 }
 
 func (s *Service) Write(ctx context.Context, req Request, dst io.Writer, beforeWrite func(Metadata)) error {
@@ -27,7 +27,7 @@ func (s *Service) Write(ctx context.Context, req Request, dst io.Writer, beforeW
 }
 
 func (s *Service) writeCached(ctx context.Context, req Request, dst io.Writer, beforeWrite func(Metadata)) (bool, error) {
-	key, err := s.cache.key(ctx, req)
+	key, err := s.cache.key(ctx, s.imageSource(), req)
 	if err != nil {
 		return true, err
 	}
@@ -77,8 +77,7 @@ func (s *Service) writeCached(ctx context.Context, req Request, dst io.Writer, b
 }
 
 func (s *Service) writeFromImage(ctx context.Context, req Request, dst io.Writer, beforeWrite func(Metadata), cacheWriter *cacheWriter) error {
-	extractor := &ociimage.Extractor{}
-	file, err := extractor.OpenFile(ctx, req.ImageRef, req.FilePath, ociOptions(req.Options))
+	file, err := s.imageSource().OpenFile(ctx, req.ImageRef, req.FilePath, ociOptions(req.Options))
 	if err != nil {
 		return err
 	}
@@ -106,6 +105,13 @@ func (s *Service) writeFromImage(ctx context.Context, req Request, dst io.Writer
 		}
 	}
 	return nil
+}
+
+func (s *Service) imageSource() imageSource {
+	if s.images != nil {
+		return s.images
+	}
+	return &ociimage.Extractor{}
 }
 
 func notifyBeforeWrite(fn func(Metadata), meta Metadata) {
