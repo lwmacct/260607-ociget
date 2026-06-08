@@ -23,6 +23,17 @@ type listImageFilesOutput struct {
 	Body imagebrowser.Directory
 }
 
+type listImagePlatformsInput struct {
+	Ref      string `query:"ref" required:"true" doc:"Image reference"`
+	Insecure bool   `query:"insecure" doc:"Allow insecure image registry access"`
+}
+
+type listImagePlatformsOutput struct {
+	Body struct {
+		Platforms []ociimage.Platform `json:"platforms"`
+	}
+}
+
 func registerImageRoutes(api huma.API, browser *imagebrowser.Browser) {
 	huma.Register(api, huma.Operation{
 		OperationID: "list-image-files",
@@ -56,6 +67,24 @@ func registerImageRoutes(api huma.API, browser *imagebrowser.Browser) {
 
 		out := &listImageFilesOutput{}
 		out.Body = *dir
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-image-platforms",
+		Method:      http.MethodGet,
+		Path:        "/images/platforms",
+		Summary:     "List image platforms",
+		Tags:        []string{"images"},
+	}, func(ctx context.Context, input *listImagePlatformsInput) (*listImagePlatformsOutput, error) {
+		extractor := &ociimage.Extractor{}
+		platforms, err := extractor.Platforms(ctx, input.Ref, ociimage.OpenOptions{Insecure: input.Insecure})
+		if err != nil {
+			return nil, huma.Error502BadGateway("failed to read image platforms")
+		}
+
+		out := &listImagePlatformsOutput{}
+		out.Body.Platforms = platforms
 		return out, nil
 	})
 }

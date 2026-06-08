@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 var (
@@ -26,6 +27,24 @@ type Extractor struct{}
 type OpenOptions struct {
 	Platform *v1.Platform
 	Insecure bool
+}
+
+type Platform struct {
+	OS           string `json:"os"`
+	Architecture string `json:"architecture"`
+	Variant      string `json:"variant,omitempty"`
+	OSVersion    string `json:"osVersion,omitempty"`
+}
+
+func (p Platform) String() string {
+	parts := []string{p.OS, p.Architecture}
+	if p.OS == "" || p.Architecture == "" {
+		return ""
+	}
+	if p.Variant != "" {
+		parts = append(parts, p.Variant)
+	}
+	return strings.Join(parts, "/")
 }
 
 type File struct {
@@ -50,6 +69,53 @@ func (l imageLayer) Open() (io.ReadCloser, error) {
 
 func (e *Extractor) Image(ctx context.Context, imageRef string, opts OpenOptions) (v1.Image, error) {
 	return e.remoteImage(ctx, imageRef, opts)
+}
+
+func (e *Extractor) Platforms(ctx context.Context, imageRef string, opts OpenOptions) ([]Platform, error) {
+	desc, err := e.remoteDescriptor(ctx, imageRef, opts)
+	if err != nil {
+		return nil, fmt.Errorf("pull image descriptor: %w", err)
+	}
+	switch desc.MediaType {
+	case types.OCIManifestSchema1, types.DockerManifestSchema2, types.DockerManifestSchema1, types.DockerManifestSchema1Signed:
+		return []Platform{}, nil
+	}
+
+	index, err := desc.ImageIndex()
+	if err != nil {
+		return nil, fmt.Errorf("read image index descriptor: %w", err)
+	}
+	manifest, err := index.IndexManifest()
+	if err != nil {
+		return nil, fmt.Errorf("read image index: %w", err)
+	}
+	return platformsFromManifest(manifest), nil
+}
+
+func platformsFromManifest(manifest *v1.IndexManifest) []Platform {
+	platforms := make([]Platform, 0, len(manifest.Manifests))
+	seen := map[string]struct{}{}
+	for _, desc := range manifest.Manifests {
+		if desc.Platform == nil {
+			continue
+		}
+		platform := Platform{
+			OS:           desc.Platform.OS,
+			Architecture: desc.Platform.Architecture,
+			Variant:      desc.Platform.Variant,
+			OSVersion:    desc.Platform.OSVersion,
+		}
+		key := platform.String()
+		if key == "" || key == "unknown/unknown" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		platforms = append(platforms, platform)
+	}
+	return platforms
 }
 
 func (e *Extractor) OpenFile(ctx context.Context, imageRef, filePath string, opts OpenOptions) (*File, error) {
@@ -96,7 +162,49 @@ func (e *Extractor) remoteImage(ctx context.Context, imageRef string, opts OpenO
 	return pullRemoteImage(ctx, imageRef, opts, true)
 }
 
+func (e *Extractor) remoteIndex(ctx context.Context, imageRef string, opts OpenOptions) (v1.ImageIndex, error) {
+	index, err := pullRemoteIndex(ctx, imageRef, opts, false)
+	if err == nil || opts.Insecure || !shouldRetryInsecure(err) {
+		return index, err
+	}
+	opts.Insecure = true
+	return pullRemoteIndex(ctx, imageRef, opts, true)
+}
+
+func (e *Extractor) remoteDescriptor(ctx context.Context, imageRef string, opts OpenOptions) (*remote.Descriptor, error) {
+	desc, err := pullRemoteDescriptor(ctx, imageRef, opts, false)
+	if err == nil || opts.Insecure || !shouldRetryInsecure(err) {
+		return desc, err
+	}
+	opts.Insecure = true
+	return pullRemoteDescriptor(ctx, imageRef, opts, true)
+}
+
 func pullRemoteImage(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (v1.Image, error) {
+	ref, remoteOpts, err := remoteReferenceOptions(ctx, imageRef, opts, insecure)
+	if err != nil {
+		return nil, err
+	}
+	return remote.Image(ref, remoteOpts...)
+}
+
+func pullRemoteIndex(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (v1.ImageIndex, error) {
+	ref, remoteOpts, err := remoteReferenceOptions(ctx, imageRef, opts, insecure)
+	if err != nil {
+		return nil, err
+	}
+	return remote.Index(ref, remoteOpts...)
+}
+
+func pullRemoteDescriptor(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (*remote.Descriptor, error) {
+	ref, remoteOpts, err := remoteReferenceOptions(ctx, imageRef, opts, insecure)
+	if err != nil {
+		return nil, err
+	}
+	return remote.Get(ref, remoteOpts...)
+}
+
+func remoteReferenceOptions(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (name.Reference, []remote.Option, error) {
 	nameOpts := []name.Option(nil)
 	if insecure {
 		nameOpts = append(nameOpts, name.Insecure)
@@ -104,7 +212,7 @@ func pullRemoteImage(ctx context.Context, imageRef string, opts OpenOptions, ins
 
 	ref, err := name.ParseReference(imageRef, nameOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("parse image reference: %w", err)
+		return nil, nil, fmt.Errorf("parse image reference: %w", err)
 	}
 
 	remoteOpts := []remote.Option{
@@ -116,7 +224,7 @@ func pullRemoteImage(ctx context.Context, imageRef string, opts OpenOptions, ins
 		remoteOpts = append(remoteOpts, remote.WithPlatform(*opts.Platform))
 	}
 
-	return remote.Image(ref, remoteOpts...)
+	return ref, remoteOpts, nil
 }
 
 func shouldRetryInsecure(err error) bool {

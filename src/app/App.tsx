@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Layout,
+  Select,
   Space,
   Table,
   Tag,
@@ -41,8 +42,20 @@ type DirectoryResponse = {
   entries: ImageEntry[];
 };
 
+type ImagePlatform = {
+  os: string;
+  architecture: string;
+  variant?: string;
+  osVersion?: string;
+};
+
+type PlatformsResponse = {
+  platforms: ImagePlatform[];
+};
+
 type BrowseForm = {
   imageRef: string;
+  path: string;
   platform: string;
   insecure: boolean;
 };
@@ -104,6 +117,17 @@ function downloadHref(imageRef: string, path: string, platform: string, insecure
   return `/download/${imageRef}/-/${path}${suffix ? `?${suffix}` : ""}`;
 }
 
+function platformValue(platform: ImagePlatform) {
+  return [platform.os, platform.architecture, platform.variant].filter(Boolean).join("/");
+}
+
+function choosePlatform(platforms: ImagePlatform[], current: string) {
+  const values = platforms.map(platformValue).filter(Boolean);
+  if (current && values.includes(current)) return current;
+  if (values.includes(defaultPlatform)) return defaultPlatform;
+  return values[0] ?? current;
+}
+
 export default function App() {
   const [form] = Form.useForm<BrowseForm>();
   const [imageRef, setImageRef] = useState(defaultImage);
@@ -111,8 +135,11 @@ export default function App() {
   const [insecure, setInsecure] = useState(false);
   const [path, setPath] = useState("/");
   const [directory, setDirectory] = useState<DirectoryResponse | null>(null);
+  const [platformOptions, setPlatformOptions] = useState<string[]>([defaultPlatform]);
   const [loading, setLoading] = useState(false);
+  const [platformLoading, setPlatformLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [platformError, setPlatformError] = useState<string | null>(null);
 
   const loadDirectory = async (nextPath = path, values?: Partial<BrowseForm>) => {
     const nextImage = values?.imageRef?.trim() || imageRef.trim();
@@ -142,11 +169,43 @@ export default function App() {
       setPlatform(nextPlatform);
       setInsecure(nextInsecure);
       setPath(normalizePath(data.path));
+      form.setFieldsValue({ imageRef: nextImage, platform: nextPlatform, insecure: nextInsecure, path: normalizePath(data.path) });
       setDirectory(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load image directory");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPlatforms = async () => {
+    const values = form.getFieldsValue();
+    const nextImage = values.imageRef?.trim() || imageRef.trim();
+    const nextInsecure = values.insecure ?? insecure;
+
+    setPlatformLoading(true);
+    setPlatformError(null);
+    try {
+      const query = new URLSearchParams({ ref: nextImage });
+      if (nextInsecure) query.set("insecure", "true");
+      const res = await fetch(`/api/images/platforms?${query.toString()}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const detail = typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+      const data = (await res.json()) as PlatformsResponse;
+      const nextOptions = data.platforms.map(platformValue).filter(Boolean);
+      setPlatformOptions(nextOptions.length ? nextOptions : [platform || defaultPlatform]);
+      const selected = choosePlatform(data.platforms, values.platform?.trim() || platform);
+      if (selected) {
+        setPlatform(selected);
+        form.setFieldValue("platform", selected);
+      }
+    } catch (err) {
+      setPlatformError(err instanceof Error ? err.message : "failed to load platforms");
+    } finally {
+      setPlatformLoading(false);
     }
   };
 
@@ -241,9 +300,9 @@ export default function App() {
           <Form<BrowseForm>
             form={form}
             className="query-form"
-            initialValues={{ imageRef: defaultImage, platform: defaultPlatform, insecure: false }}
+            initialValues={{ imageRef: defaultImage, path: "/", platform: defaultPlatform, insecure: false }}
             layout="vertical"
-            onFinish={(values) => void loadDirectory("/", values)}
+            onFinish={(values) => void loadDirectory(values.path, values)}
           >
             <Form.Item
               label="Image"
@@ -252,8 +311,18 @@ export default function App() {
             >
               <Input placeholder="ghcr.io/org/image:tag" />
             </Form.Item>
+            <Form.Item label="Path" name="path">
+              <Input placeholder="/usr/local/bin" />
+            </Form.Item>
             <Form.Item label="Platform" name="platform">
-              <Input placeholder="linux/amd64" />
+              <Select
+                allowClear
+                showSearch
+                loading={platformLoading}
+                options={platformOptions.map((value) => ({ value, label: value }))}
+                placeholder="linux/amd64"
+                popupMatchSelectWidth={false}
+              />
             </Form.Item>
             <Form.Item className="check-item" name="insecure" valuePropName="checked">
               <Checkbox>Insecure registry</Checkbox>
@@ -266,12 +335,18 @@ export default function App() {
                 <Tooltip title="Reload current directory">
                   <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void loadDirectory(path)} />
                 </Tooltip>
+                <Tooltip title="Load platform list">
+                  <Button loading={platformLoading} onClick={() => void loadPlatforms()}>
+                    Platforms
+                  </Button>
+                </Tooltip>
               </Space>
             </Form.Item>
           </Form>
         </section>
 
         {error ? <Alert className="error-alert" type="error" showIcon message={error} /> : null}
+        {platformError ? <Alert className="error-alert" type="warning" showIcon message={platformError} /> : null}
 
         <section className="browser-panel">
           <div className="browser-toolbar">
