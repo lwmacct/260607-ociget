@@ -21,7 +21,7 @@ type downloadArchiveInput struct {
 	Insecure bool     `json:"insecure,omitempty"`
 }
 
-func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
+func (app *runtime) handleDownload(w http.ResponseWriter, r *http.Request) {
 	imageRef, filePath, err := downloadTarget(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -57,7 +57,7 @@ func (app *serverApp) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (app *serverApp) handleDownloadArchive(w http.ResponseWriter, r *http.Request) {
+func (app *runtime) handleDownloadArchive(w http.ResponseWriter, r *http.Request) {
 	var input downloadArchiveInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid archive request", http.StatusBadRequest)
@@ -118,14 +118,14 @@ func archiveOptions(input downloadArchiveInput) (download.Options, error) {
 	return opts, nil
 }
 
-func (app *serverApp) downloadService() (*download.Service, error) {
+func (app *runtime) downloadService() (*download.Service, error) {
 	if app.downloads != nil {
 		return app.downloads, nil
 	}
 	return download.NewService(download.CacheConfig{})
 }
 
-func (app *serverApp) writeDownloadHeaders(w http.ResponseWriter, filename string, size int64, modTime time.Time) {
+func (app *runtime) writeDownloadHeaders(w http.ResponseWriter, filename string, size int64, modTime time.Time) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, download.HeaderFilename(filename)))
 	if size >= 0 {

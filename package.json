@@ -1,6 +1,6 @@
 {
   "name": "webapp-web",
-  "version": "0.10.260608",
+  "version": "0.11.260721",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,17 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.2.5",
-    "antd": "^6.4.3",
+    "@ant-design/icons": "^6.3.2",
+    "antd": "^6.5.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@types/node": "^25.0.0",
-    "@types/react": "^19.2.15",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.2",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.14"
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
   }
 }

@@ -10,18 +10,21 @@
 # node_modules
 **/node_modules/
 **/tsconfig.tsbuildinfo
-**/*.tsbuildinfo
 
 # 构建输出
 bin-*
 bin/
 dist/
 build/
+out/
+.next/
 *.vsix
 [0-9]*-
 
 # 生成文件
-gen/
+**/gen/
+**/__pycache__/
+**/*.py[cod]
 
 # 临时文件
 **/*.bak
@@ -46,3 +49,7 @@ config/config.yaml
 
 # AI tools
 .playwright-mcp
+
+# Go workspace
+go.work
+go.work.sum

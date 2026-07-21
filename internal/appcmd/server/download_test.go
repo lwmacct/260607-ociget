@@ -8,7 +8,7 @@ import (
 )
 
 func TestHandleDownloadWithoutCacheWritesOpenError(t *testing.T) {
-	app := &serverApp{}
+	app := &runtime{}
 	req := httptest.NewRequest(http.MethodGet, "/download/!!!/-/etc/passwd", nil)
 	rec := httptest.NewRecorder()
 
@@ -20,7 +20,7 @@ func TestHandleDownloadWithoutCacheWritesOpenError(t *testing.T) {
 }
 
 func TestHandleDownloadArchiveRejectsMissingTarget(t *testing.T) {
-	app := &serverApp{}
+	app := &runtime{}
 	req := httptest.NewRequest(http.MethodPost, "/download/archive", strings.NewReader(`{"ref":"alpine:latest"}`))
 	rec := httptest.NewRecorder()
 
