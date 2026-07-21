@@ -374,7 +374,7 @@ export default function App() {
             className="query-form"
             initialValues={{ imageRef: defaultImage, path: "/", platform: defaultPlatform, insecure: false }}
             layout="vertical"
-            onFinish={(values) => void loadDirectory(values.path, values)}
+            onFinish={(values: BrowseForm) => void loadDirectory(values.path, values)}
           >
             <Form.Item
               label="Image"
@@ -466,7 +466,7 @@ export default function App() {
             }}
             pagination={false}
             rowSelection={rowSelection}
-            rowKey={(entry) => entry.path}
+            rowKey={(entry: ImageEntry) => entry.path}
             scroll={{ x: 860 }}
             size="middle"
           />

@@ -1,6 +1,7 @@
 {
   "name": "webapp-web",
-  "version": "0.11.260721",
+  "version": "0.12.260721",
+  "packageManager": "pnpm@11.10.0",
   "private": true,
   "type": "module",
   "scripts": {
