@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -32,10 +35,6 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 		rt = &runtime{}
 	}
 	router := chi.NewRouter()
-	router.Get("/", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write([]byte(`{"message":"webapp backend is running","api":"/api"}`))
-	})
 	router.Get("/download", rt.handleDownload)
 	router.Get("/download/*", rt.handleDownload)
 	router.Post("/download/archive", rt.handleDownloadArchive)
@@ -44,7 +43,55 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 	router.Mount("/api", apiRouter)
 	api := humachi.New(apiRouter, huma.DefaultConfig("Web App Skeleton", version.AppVersion))
 	registerRoutes(api, rt.db, cfg, rt.browser)
+	frontend := newFrontendHTTPHandler()
+	router.NotFound(frontend.ServeHTTP)
 	return router
+}
+
+func newFrontendHTTPHandler() http.Handler {
+	frontendDir := strings.TrimSpace(os.Getenv("FRONTEND_DIR"))
+	if frontendDir == "" {
+		return http.NotFoundHandler()
+	}
+	return frontendFileServer(frontendDir)
+}
+
+func frontendFileServer(root string) http.Handler {
+	fs := http.Dir(root)
+	fileServer := http.FileServer(fs)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/" {
+			if !fileExists(fs, "/index.html") {
+				http.NotFound(w, r)
+				return
+			}
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		if fileExists(fs, r.URL.Path) {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+func fileExists(fs http.FileSystem, urlPath string) bool {
+	name := strings.TrimPrefix(path.Clean(urlPath), "/")
+	if name == "." {
+		name = ""
+	}
+	file, err := fs.Open(name)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	return err == nil && !info.IsDir()
 }
 
 type healthOutput struct {
