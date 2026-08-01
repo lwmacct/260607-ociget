@@ -80,7 +80,13 @@ export function sameImageSource(left: ImageSource, right: ImageSource): boolean 
     && left.insecure === right.insecure;
 }
 
-export function downloadHref(imageId: string, path: string): string {
-  const query = new URLSearchParams({ path: normalizeImagePath(path) });
-  return `/api/images/${encodeURIComponent(imageId)}/file?${query.toString()}`;
+export function downloadHref(source: Pick<ImageSource, "imageRef" | "platform" | "insecure">, path: string): string {
+  const query = new URLSearchParams();
+  if (source.platform.trim()) query.set("platform", source.platform.trim());
+  if (source.insecure) query.set("insecure", "1");
+  const suffix = query.toString();
+  const imageRef = source.imageRef.trim().split("/")
+    .map((segment) => encodeURIComponent(segment).replace(/%3A/gi, ":").replace(/%40/gi, "@"))
+    .join("/");
+  return `/${imageRef}/-/${normalizeImagePath(path).replace(/^\//, "")}${suffix ? `?${suffix}` : ""}`;
 }

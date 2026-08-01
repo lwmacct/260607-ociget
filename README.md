@@ -18,9 +18,16 @@ curl -X POST http://localhost:40248/api/images \\
   -d '{"ref":"<image>","platform":"linux/amd64"}'
 ```
 
-The response contains an immutable `imageId`. Browse and download files from that image:
+The response contains an immutable `imageId`. Browse files from that materialized image:
 
 ```bash
 curl "http://localhost:40248/api/images/<imageId>/entries?path=/usr/local/bin"
-wget "http://localhost:40248/api/images/<imageId>/file?path=/usr/local/bin/app"
 ```
+
+For direct downloads, use the compact root URL form. The first `/-/` separates the OCI image reference from the file path:
+
+```bash
+wget "http://localhost:40248/ghcr.io/lwmacct/260606-sshrt:v0.129.260607/-/usr/local/bin/app"
+```
+
+Optional query parameters are `platform=linux/amd64`, `insecure=1`, and `refresh=1` (to resolve a mutable tag again).

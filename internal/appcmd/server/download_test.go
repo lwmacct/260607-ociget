@@ -70,16 +70,19 @@ func TestImageArchiveReadsMaterializedFiles(t *testing.T) {
 	}
 }
 
-func TestOldDownloadRouteIsGone(t *testing.T) {
-	config := config.DefaultConfig().Server
+func TestImagePathDownload(t *testing.T) {
+	handler, _ := imageRouteTestHandler(t)
 	recorder := httptest.NewRecorder()
-	newHTTPHandler(&config, nil).ServeHTTP(recorder, httptest.NewRequest(
+	handler.ServeHTTP(recorder, httptest.NewRequest(
 		http.MethodGet,
-		"/download/alpine:latest/-/etc/alpine-release",
+		"/example.test/tool:v1/-/usr/bin/app?platform=linux%2Famd64",
 		nil,
 	))
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", recorder.Code)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "payload" {
+		t.Fatalf("body = %q, want payload", recorder.Body.String())
 	}
 }
 

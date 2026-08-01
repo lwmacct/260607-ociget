@@ -18,6 +18,9 @@ func NormalizePath(input string) (string, error) {
 	if strings.Contains(input, "\\") {
 		return "", ErrInvalidPath
 	}
+	if strings.ContainsRune(input, '\x00') {
+		return "", ErrInvalidPath
+	}
 
 	for _, part := range strings.Split(input, "/") {
 		if part == ".." {

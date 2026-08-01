@@ -42,8 +42,22 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 	api := humachi.New(apiRouter, huma.DefaultConfig("Web App Skeleton", version.AppVersion))
 	registerRoutes(api, rt.db, cfg, rt.images)
 	frontend := newFrontendHTTPHandler()
-	router.NotFound(frontend.ServeHTTP)
+	rootHandler := func(w http.ResponseWriter, r *http.Request) {
+		if appCanHandleImagePath(rt, r) {
+			rt.handleImagePathDownload(w, r)
+			return
+		}
+		frontend.ServeHTTP(w, r)
+	}
+	router.NotFound(rootHandler)
 	return router
+}
+
+func appCanHandleImagePath(rt *runtime, r *http.Request) bool {
+	return rt != nil &&
+		(r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		!strings.HasPrefix(r.URL.Path, "/api/") &&
+		strings.Contains(r.URL.Path, imagePathSeparator)
 }
 
 func newFrontendHTTPHandler() http.Handler {

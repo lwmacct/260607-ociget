@@ -40,6 +40,39 @@ func (app *runtime) handleImageFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, file.Entry.Name, file.Entry.ModTime, file.Reader)
 }
 
+func (app *runtime) handleImagePathDownload(w http.ResponseWriter, r *http.Request) {
+	if app.images == nil {
+		http.Error(w, "image store unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	imageRef, filePath, err := parseImagePath(r.URL.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	options, err := parseImagePathOptions(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	image, err := app.images.Open(r.Context(), options.openRequest(imageRef))
+	if err != nil {
+		writeImagePathError(w, err)
+		return
+	}
+	file, err := app.images.OpenFile(image.ImageID, filePath)
+	if err != nil {
+		writeImagePathError(w, err)
+		return
+	}
+	defer file.Reader.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, headerFilename(file.Entry.Name)))
+	w.Header().Set("ETag", strconv.Quote("sha256:"+file.Entry.ContentDigest))
+	http.ServeContent(w, r, file.Entry.Name, file.Entry.ModTime, file.Reader)
+}
+
 func (app *runtime) handleImageArchive(w http.ResponseWriter, r *http.Request) {
 	if app.images == nil {
 		http.Error(w, "image store unavailable", http.StatusServiceUnavailable)
@@ -103,6 +136,19 @@ func writeImageStoreError(w http.ResponseWriter, err error) {
 		http.Error(w, "path is not a regular file", http.StatusUnprocessableEntity)
 	default:
 		http.Error(w, "failed to read image store", http.StatusInternalServerError)
+	}
+}
+
+func writeImagePathError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ociimage.ErrInvalidPath):
+		http.Error(w, "invalid path", http.StatusBadRequest)
+	case errors.Is(err, ociimage.ErrNotFound), errors.Is(err, imagestore.ErrImageNotFound):
+		http.Error(w, "path or image not found", http.StatusNotFound)
+	case errors.Is(err, imagestore.ErrNotRegularFile):
+		http.Error(w, "path is not a regular file", http.StatusUnprocessableEntity)
+	default:
+		http.Error(w, "failed to read image", http.StatusBadGateway)
 	}
 }
 

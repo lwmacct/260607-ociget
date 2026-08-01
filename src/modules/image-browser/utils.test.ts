@@ -41,9 +41,14 @@ describe("image source utilities", () => {
     expect(choosePlatform(platforms, "windows/amd64")).toBe("linux/amd64");
   });
 
-  it("builds downloads from an immutable image id", () => {
-    const href = new URL(downloadHref("sha256:abc", "/usr//bin/tool"), "https://example.test");
-    expect(href.pathname).toBe("/api/images/sha256%3Aabc/file");
-    expect(href.searchParams.get("path")).toBe("/usr/bin/tool");
+  it("builds direct image downloads", () => {
+    const href = new URL(downloadHref({ imageRef: "ghcr.io/acme/tool:v1", platform: "linux/amd64", insecure: false }, "/usr//bin/tool"), "https://example.test");
+    expect(href.pathname).toBe("/ghcr.io/acme/tool:v1/-/usr/bin/tool");
+    expect(href.searchParams.get("platform")).toBe("linux/amd64");
+  });
+
+  it("escapes image reference delimiters", () => {
+    expect(downloadHref({ imageRef: "registry.example/acme/tool:v1#unsafe", platform: "", insecure: true }, "/bin/app"))
+      .toBe("/registry.example/acme/tool:v1%23unsafe/-/bin/app?insecure=1");
   });
 });
