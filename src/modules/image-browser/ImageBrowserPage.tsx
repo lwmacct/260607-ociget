@@ -70,10 +70,10 @@ export function ImageBrowserPage() {
             />
             <FileTable
               entries={browser.session.directory.entries}
+              imageId={browser.session.image.imageId}
               loading={browser.directoryLoading}
               locale={locale}
               selectedPaths={browser.selectedPaths}
-              source={browser.session.source}
               text={text.browser}
               onNavigate={(path) => void browser.navigate(path)}
               onSelectionChange={browser.setSelectedPaths}

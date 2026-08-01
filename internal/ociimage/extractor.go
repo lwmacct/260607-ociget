@@ -36,6 +36,21 @@ type Platform struct {
 	OSVersion    string `json:"osVersion,omitempty"`
 }
 
+func ParsePlatform(input string) (v1.Platform, error) {
+	parts := strings.Split(strings.TrimSpace(input), "/")
+	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {
+		return v1.Platform{}, fmt.Errorf("platform must be os/arch or os/arch/variant")
+	}
+	platform := v1.Platform{OS: parts[0], Architecture: parts[1]}
+	if len(parts) == 3 {
+		if parts[2] == "" {
+			return v1.Platform{}, fmt.Errorf("platform variant is empty")
+		}
+		platform.Variant = parts[2]
+	}
+	return platform, nil
+}
+
 func (p Platform) String() string {
 	parts := []string{p.OS, p.Architecture}
 	if p.OS == "" || p.Architecture == "" {
@@ -162,15 +177,6 @@ func (e *Extractor) remoteImage(ctx context.Context, imageRef string, opts OpenO
 	return pullRemoteImage(ctx, imageRef, opts, true)
 }
 
-func (e *Extractor) remoteIndex(ctx context.Context, imageRef string, opts OpenOptions) (v1.ImageIndex, error) {
-	index, err := pullRemoteIndex(ctx, imageRef, opts, false)
-	if err == nil || opts.Insecure || !shouldRetryInsecure(err) {
-		return index, err
-	}
-	opts.Insecure = true
-	return pullRemoteIndex(ctx, imageRef, opts, true)
-}
-
 func (e *Extractor) remoteDescriptor(ctx context.Context, imageRef string, opts OpenOptions) (*remote.Descriptor, error) {
 	desc, err := pullRemoteDescriptor(ctx, imageRef, opts, false)
 	if err == nil || opts.Insecure || !shouldRetryInsecure(err) {
@@ -186,14 +192,6 @@ func pullRemoteImage(ctx context.Context, imageRef string, opts OpenOptions, ins
 		return nil, err
 	}
 	return remote.Image(ref, remoteOpts...)
-}
-
-func pullRemoteIndex(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (v1.ImageIndex, error) {
-	ref, remoteOpts, err := remoteReferenceOptions(ctx, imageRef, opts, insecure)
-	if err != nil {
-		return nil, err
-	}
-	return remote.Index(ref, remoteOpts...)
 }
 
 func pullRemoteDescriptor(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (*remote.Descriptor, error) {

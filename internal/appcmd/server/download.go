@@ -1,167 +1,116 @@
 package server
 
 import (
+	"archive/tar"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/lwmacct/260607-ociget/internal/download"
+	"github.com/go-chi/chi/v5"
+	"github.com/lwmacct/260607-ociget/internal/imagestore"
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
-type downloadArchiveInput struct {
-	Ref      string   `json:"ref"`
-	Paths    []string `json:"paths"`
-	Platform string   `json:"platform,omitempty"`
-	Insecure bool     `json:"insecure,omitempty"`
+type imageArchiveInput struct {
+	Paths []string `json:"paths"`
 }
 
-func (app *runtime) handleDownload(w http.ResponseWriter, r *http.Request) {
-	imageRef, filePath, err := downloadTarget(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+func (app *runtime) handleImageFile(w http.ResponseWriter, r *http.Request) {
+	if app.images == nil {
+		http.Error(w, "image store unavailable", http.StatusServiceUnavailable)
 		return
 	}
-
-	openOpts, err := downloadOpenOptions(r)
+	imageID := chi.URLParam(r, "imageID")
+	file, err := app.images.OpenFile(imageID, r.URL.Query().Get("path"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeImageStoreError(w, err)
 		return
 	}
+	defer file.Reader.Close()
 
-	service, err := app.downloadService()
-	if err != nil {
-		http.Error(w, "failed to initialize downloader", http.StatusInternalServerError)
-		return
-	}
-
-	req := download.Request{
-		ImageRef: imageRef,
-		FilePath: filePath,
-		Options:  openOpts,
-	}
-	err = service.Write(r.Context(), req, w, func(meta download.Metadata) {
-		app.writeDownloadHeaders(w, download.Filename(meta.Path), meta.Size, meta.ModTime)
-	})
-	if err != nil && !errors.Is(err, download.ErrWriterStarted) {
-		writeDownloadError(w, err)
-		slog.Warn("download failed", "image", imageRef, "path", filePath, "error", err)
-	}
-	if errors.Is(err, download.ErrWriterStarted) {
-		slog.Warn("download stream interrupted", "image", imageRef, "path", filePath, "error", err)
-	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, headerFilename(file.Entry.Name)))
+	w.Header().Set("ETag", strconv.Quote("sha256:"+file.Entry.ContentDigest))
+	http.ServeContent(w, r, file.Entry.Name, file.Entry.ModTime, file.Reader)
 }
 
-func (app *runtime) handleDownloadArchive(w http.ResponseWriter, r *http.Request) {
-	var input downloadArchiveInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, "invalid archive request", http.StatusBadRequest)
+func (app *runtime) handleImageArchive(w http.ResponseWriter, r *http.Request) {
+	if app.images == nil {
+		http.Error(w, "image store unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	input.Ref = strings.TrimSpace(input.Ref)
-	if input.Ref == "" || len(input.Paths) == 0 {
-		http.Error(w, "image and paths are required", http.StatusBadRequest)
+	var input imageArchiveInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input.Paths) == 0 {
+		http.Error(w, "paths are required", http.StatusBadRequest)
 		return
 	}
-
-	opts, err := archiveOptions(input)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	imageID := chi.URLParam(r, "imageID")
+	files := make([]*imagestore.File, 0, len(input.Paths))
+	for _, filePath := range input.Paths {
+		file, err := app.images.OpenFile(imageID, filePath)
+		if err != nil {
+			for _, opened := range files {
+				_ = opened.Reader.Close()
+			}
+			writeImageStoreError(w, err)
+			return
+		}
+		files = append(files, file)
 	}
-
-	service, err := app.downloadService()
-	if err != nil {
-		http.Error(w, "failed to initialize downloader", http.StatusInternalServerError)
-		return
-	}
+	defer func() {
+		for _, file := range files {
+			_ = file.Reader.Close()
+		}
+	}()
 
 	w.Header().Set("Content-Type", "application/x-tar")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, download.HeaderFilename("image-files.tar")))
-	err = service.WriteArchive(r.Context(), download.ArchiveRequest{
-		ImageRef: input.Ref,
-		Paths:    input.Paths,
-		Options:  opts,
-	}, w)
-	if err != nil && !errors.Is(err, download.ErrWriterStarted) {
-		writeDownloadError(w, err)
-		slog.Warn("archive download failed", "image", input.Ref, "paths", len(input.Paths), "error", err)
-	}
-	if errors.Is(err, download.ErrWriterStarted) {
-		slog.Warn("archive download stream interrupted", "image", input.Ref, "paths", len(input.Paths), "error", err)
-	}
-}
-
-func downloadTarget(r *http.Request) (string, string, error) {
-	if strings.TrimSpace(r.URL.Query().Get("ref")) != "" || strings.TrimSpace(r.URL.Query().Get("path")) != "" {
-		return download.ParseQuery(r.URL.Query())
-	}
-	return download.ParsePath(r.URL.Path)
-}
-
-func archiveOptions(input downloadArchiveInput) (download.Options, error) {
-	var opts download.Options
-	platformParam := strings.TrimSpace(input.Platform)
-	if platformParam != "" {
-		platform, err := download.ParsePlatform(platformParam)
-		if err != nil {
-			return opts, err
+	w.Header().Set("Content-Disposition", `attachment; filename="image-files.tar"`)
+	tarWriter := tar.NewWriter(w)
+	for _, file := range files {
+		header := &tar.Header{
+			Name:    strings.TrimPrefix(file.Entry.Path, "/"),
+			Mode:    file.Entry.Mode,
+			Size:    file.Entry.Size,
+			ModTime: file.Entry.ModTime,
 		}
-		opts.Platform = &platform
+		if err := tarWriter.WriteHeader(header); err != nil {
+			slog.Warn("archive header write failed", "imageId", imageID, "path", file.Entry.Path, "error", err)
+			return
+		}
+		if _, err := io.Copy(tarWriter, file.Reader); err != nil {
+			slog.Warn("archive file write failed", "imageId", imageID, "path", file.Entry.Path, "error", err)
+			return
+		}
 	}
-	opts.Insecure = input.Insecure
-	return opts, nil
-}
-
-func (app *runtime) downloadService() (*download.Service, error) {
-	if app.downloads != nil {
-		return app.downloads, nil
-	}
-	return download.NewService(download.CacheConfig{})
-}
-
-func (app *runtime) writeDownloadHeaders(w http.ResponseWriter, filename string, size int64, modTime time.Time) {
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, download.HeaderFilename(filename)))
-	if size >= 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-	}
-	if !modTime.IsZero() {
-		w.Header().Set("Last-Modified", modTime.UTC().Format(http.TimeFormat))
+	if err := tarWriter.Close(); err != nil {
+		slog.Warn("archive close failed", "imageId", imageID, "error", err)
 	}
 }
 
-func writeDownloadError(w http.ResponseWriter, err error) {
+func writeImageStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ociimage.ErrInvalidPath):
 		http.Error(w, "invalid path", http.StatusBadRequest)
-	case errors.Is(err, ociimage.ErrNotFound):
-		http.Error(w, "file not found", http.StatusNotFound)
-	case errors.Is(err, ociimage.ErrUnsupportedFileType):
+	case errors.Is(err, ociimage.ErrNotFound), errors.Is(err, imagestore.ErrImageNotFound):
+		http.Error(w, "path or image not found", http.StatusNotFound)
+	case errors.Is(err, imagestore.ErrNotRegularFile):
 		http.Error(w, "path is not a regular file", http.StatusUnprocessableEntity)
 	default:
-		http.Error(w, "failed to read image", http.StatusBadGateway)
+		http.Error(w, "failed to read image store", http.StatusInternalServerError)
 	}
 }
 
-func downloadOpenOptions(r *http.Request) (download.Options, error) {
-	var opts download.Options
-
-	platformParam := strings.TrimSpace(r.URL.Query().Get("platform"))
-	if platformParam != "" {
-		platform, err := download.ParsePlatform(platformParam)
-		if err != nil {
-			return opts, err
-		}
-		opts.Platform = &platform
+func headerFilename(name string) string {
+	name = filepath.Base(name)
+	name = strings.NewReplacer(`\`, "_", `"`, "_").Replace(name)
+	if name == "" || name == "." || name == "/" {
+		return "download"
 	}
-
-	insecureParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("insecure")))
-	opts.Insecure = insecureParam == "1" || insecureParam == "true" || insecureParam == "yes"
-	return opts, nil
+	return name
 }

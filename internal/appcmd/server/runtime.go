@@ -11,8 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/lwmacct/260607-ociget/internal/config"
-	"github.com/lwmacct/260607-ociget/internal/download"
-	"github.com/lwmacct/260607-ociget/internal/imagebrowser"
+	"github.com/lwmacct/260607-ociget/internal/imagestore"
 	"github.com/lwmacct/260614-go-pkg-tlsreload/pkg/tlsreload"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
@@ -22,10 +21,9 @@ import (
 const httpTLSMinVersion = tls.VersionTLS12
 
 type runtime struct {
-	db        *bun.DB
-	tls       *tlsRuntime
-	downloads *download.Service
-	browser   *imagebrowser.Browser
+	db     *bun.DB
+	tls    *tlsRuntime
+	images *imagestore.Store
 }
 
 func newRuntime(ctx context.Context, cfg *config.Server) (_ *runtime, err error) {
@@ -45,19 +43,18 @@ func newRuntime(ctx context.Context, cfg *config.Server) (_ *runtime, err error)
 		return nil, fmt.Errorf("configure tls: %w", err)
 	}
 
-	cacheTTL, err := cfg.DownloadCache.TTLDuration()
+	refTTL, err := cfg.ImageStore.RefTTLDuration()
 	if err != nil {
 		return nil, err
 	}
-	rt.downloads, err = download.NewService(download.CacheConfig{
-		Enabled: cfg.DownloadCache.Enabled,
-		Dir:     cfg.DownloadCache.Dir,
-		TTL:     cacheTTL,
+	rt.images, err = imagestore.New(imagestore.Config{
+		Dir:      cfg.ImageStore.Dir,
+		RefTTL:   refTTL,
+		MaxBytes: cfg.ImageStore.MaxBytes,
 	})
 	if err != nil {
 		return nil, err
 	}
-	rt.browser = &imagebrowser.Browser{}
 	return rt, nil
 }
 

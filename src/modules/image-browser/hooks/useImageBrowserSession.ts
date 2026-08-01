@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { downloadImageArchive, listImageFiles, listImagePlatforms } from "../api";
-import type { ImageBrowserSession, ImageSource } from "../model";
+import { downloadImageArchive, listImageFiles, listImagePlatforms, materializeImage } from "../api";
+import type { ImageBrowserSession, ImageMaterialized, ImageSource } from "../model";
 import { DEFAULT_IMAGE_SOURCE } from "../model";
 import {
   choosePlatform,
@@ -21,10 +21,12 @@ export function useImageBrowserSession() {
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const directoryRequest = useRef({ controller: null as AbortController | null, id: 0 });
+  const materializeRequest = useRef({ controller: null as AbortController | null, id: 0 });
   const platformRequest = useRef({ controller: null as AbortController | null, id: 0 });
 
   useEffect(() => () => {
     directoryRequest.current.controller?.abort();
+    materializeRequest.current.controller?.abort();
     platformRequest.current.controller?.abort();
   }, []);
 
@@ -70,7 +72,11 @@ export function useImageBrowserSession() {
     }
   }, [draft]);
 
-  const loadDirectory = useCallback(async (source: ImageSource, path: string) => {
+  const loadDirectory = useCallback(async (
+    image: ImageMaterialized,
+    source: ImageSource,
+    path: string,
+  ) => {
     directoryRequest.current.controller?.abort();
     const controller = new AbortController();
     const id = directoryRequest.current.id + 1;
@@ -79,10 +85,11 @@ export function useImageBrowserSession() {
     setDirectoryError(null);
     setArchiveError(null);
     try {
-      const directory = await listImageFiles(source, normalizeImagePath(path), controller.signal);
+      const directory = await listImageFiles(image.imageId, normalizeImagePath(path), controller.signal);
       if (directoryRequest.current.id !== id) return false;
       setSession({
         source,
+        image,
         directory: {
           ...directory,
           path: normalizeImagePath(directory.path),
@@ -109,17 +116,38 @@ export function useImageBrowserSession() {
       insecure: draft.insecure,
     };
     if (!source.imageRef) return false;
-    return loadDirectory(source, "/");
-  }, [draft, loadDirectory]);
+    materializeRequest.current.controller?.abort();
+    const controller = new AbortController();
+    const id = materializeRequest.current.id + 1;
+    materializeRequest.current = { controller, id };
+    setDirectoryLoading(true);
+    setDirectoryError(null);
+    try {
+      const image = await materializeImage(source, controller.signal);
+      if (materializeRequest.current.id !== id) return false;
+      const directory = await listImageFiles(image.imageId, "/", controller.signal);
+      if (materializeRequest.current.id !== id) return false;
+      setSession({ source, image, directory });
+      setSelectedPaths([]);
+      return true;
+    } catch (error) {
+      if (!isAbortError(error) && materializeRequest.current.id === id) {
+        setDirectoryError(errorMessage(error));
+      }
+      return false;
+    } finally {
+      if (materializeRequest.current.id === id) setDirectoryLoading(false);
+    }
+  }, [draft]);
 
   const navigate = useCallback(async (path: string) => {
     if (!session) return false;
-    return loadDirectory(session.source, path);
+    return loadDirectory(session.image, session.source, path);
   }, [loadDirectory, session]);
 
   const reload = useCallback(async () => {
     if (!session) return false;
-    return loadDirectory(session.source, session.directory.path);
+    return loadDirectory(session.image, session.source, session.directory.path);
   }, [loadDirectory, session]);
 
   const downloadSelected = useCallback(async () => {
@@ -127,7 +155,7 @@ export function useImageBrowserSession() {
     setArchiveLoading(true);
     setArchiveError(null);
     try {
-      await downloadImageArchive(session.source, selectedPaths);
+      await downloadImageArchive(session.image.imageId, selectedPaths);
       return true;
     } catch (error) {
       setArchiveError(errorMessage(error));

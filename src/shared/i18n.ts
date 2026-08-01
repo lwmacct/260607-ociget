@@ -5,8 +5,6 @@ const zh = {
     sourceCode: "源码",
   },
   browser: {
-    title: "镜像文件浏览器",
-    description: "检查 OCI 镜像文件系统并下载所需文件。",
     imageSource: "镜像源",
     image: "镜像",
     imagePlaceholder: "ghcr.io/org/image:tag",
@@ -59,8 +57,6 @@ const en: typeof zh = {
     sourceCode: "Source code",
   },
   browser: {
-    title: "Image file browser",
-    description: "Inspect OCI image filesystems and download the files you need.",
     imageSource: "Image source",
     image: "Image",
     imagePlaceholder: "ghcr.io/org/image:tag",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ImagePlatform, ImageSource } from "./model";
+import type { ImagePlatform } from "./model";
 import {
   choosePlatform,
   downloadHref,
@@ -41,17 +41,9 @@ describe("image source utilities", () => {
     expect(choosePlatform(platforms, "windows/amd64")).toBe("linux/amd64");
   });
 
-  it("builds downloads from the committed source", () => {
-    const source: ImageSource = {
-      imageRef: "ghcr.io/acme/tool:v1",
-      platform: "linux/arm64",
-      insecure: true,
-    };
-    const href = new URL(downloadHref(source, "/usr//bin/tool"), "https://example.test");
-    expect(href.pathname).toBe("/download");
-    expect(href.searchParams.get("ref")).toBe(source.imageRef);
+  it("builds downloads from an immutable image id", () => {
+    const href = new URL(downloadHref("sha256:abc", "/usr//bin/tool"), "https://example.test");
+    expect(href.pathname).toBe("/api/images/sha256%3Aabc/file");
     expect(href.searchParams.get("path")).toBe("/usr/bin/tool");
-    expect(href.searchParams.get("platform")).toBe("linux/arm64");
-    expect(href.searchParams.get("insecure")).toBe("true");
   });
 });

@@ -10,7 +10,7 @@ import type { Key, ReactNode } from "react";
 import { useMemo } from "react";
 import type { ColumnsType } from "antd/es/table";
 import type { WorkbenchLocale } from "@lwmacct/260627-antd-workbench";
-import type { EntryType, ImageEntry, ImageSource } from "../model";
+import type { EntryType, ImageEntry } from "../model";
 import { downloadHref, formatFileDate, formatFileMode, formatFileSize } from "../utils";
 import type { Text } from "@/shared/i18n";
 
@@ -19,7 +19,7 @@ interface FileTableProps {
   loading: boolean;
   locale: WorkbenchLocale;
   selectedPaths: string[];
-  source: ImageSource;
+  imageId: string;
   text: Text["browser"];
   onNavigate(path: string): void;
   onSelectionChange(paths: string[]): void;
@@ -30,7 +30,7 @@ export function FileTable({
   loading,
   locale,
   selectedPaths,
-  source,
+  imageId,
   text,
   onNavigate,
   onSelectionChange,
@@ -95,14 +95,14 @@ export function FileTable({
         <Tooltip title={text.downloadFile(entry.name)}>
           <Button
             aria-label={text.downloadFile(entry.name)}
-            href={downloadHref(source, entry.path)}
+            href={downloadHref(imageId, entry.path)}
             icon={<DownloadOutlined />}
             size="small"
           />
         </Tooltip>
       ) : null,
     },
-  ], [locale, onNavigate, source, text]);
+  ], [imageId, locale, onNavigate, text]);
 
   return (
     <Table<ImageEntry>

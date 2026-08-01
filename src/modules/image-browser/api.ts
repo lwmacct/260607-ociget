@@ -1,4 +1,4 @@
-import type { ImageDirectory, ImagePlatform, ImageSource } from "./model";
+import type { ImageDirectory, ImageMaterialized, ImagePlatform, ImageSource } from "./model";
 import { normalizeImagePath } from "./utils";
 
 interface PlatformsResponse {
@@ -15,14 +15,29 @@ export class APIError extends Error {
   }
 }
 
-export async function listImageFiles(
+export async function materializeImage(
   source: ImageSource,
+  signal?: AbortSignal,
+): Promise<ImageMaterialized> {
+  return requestJSON<ImageMaterialized>("/api/images", signal, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ref: source.imageRef.trim(),
+      platform: source.platform.trim() || undefined,
+      insecure: source.insecure || undefined,
+    }),
+  });
+}
+
+export async function listImageFiles(
+  imageId: string,
   path: string,
   signal?: AbortSignal,
 ): Promise<ImageDirectory> {
-  const query = sourceQuery(source);
+  const query = new URLSearchParams();
   query.set("path", normalizeImagePath(path));
-  return requestJSON<ImageDirectory>(`/api/images/files?${query.toString()}`, signal);
+  return requestJSON<ImageDirectory>(`/api/images/${encodeURIComponent(imageId)}/entries?${query.toString()}`, signal);
 }
 
 export async function listImagePlatforms(
@@ -39,17 +54,14 @@ export async function listImagePlatforms(
 }
 
 export async function downloadImageArchive(
-  source: ImageSource,
+  imageId: string,
   paths: string[],
 ): Promise<void> {
-  const response = await fetch("/download/archive", {
+  const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/archive`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ref: source.imageRef,
       paths,
-      platform: source.platform || undefined,
-      insecure: source.insecure || undefined,
     }),
   });
   if (!response.ok) {
@@ -67,8 +79,8 @@ export async function downloadImageArchive(
   globalThis.setTimeout(() => URL.revokeObjectURL(href), 0);
 }
 
-async function requestJSON<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal });
+async function requestJSON<T>(url: string, signal?: AbortSignal, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, { ...init, signal });
   if (!response.ok) {
     throw await responseError(response);
   }
@@ -85,11 +97,4 @@ async function responseError(response: Response): Promise<APIError> {
   }
   const body = await response.text().catch(() => "");
   return new APIError(body.trim() || fallback, response.status);
-}
-
-function sourceQuery(source: ImageSource): URLSearchParams {
-  const query = new URLSearchParams({ ref: source.imageRef.trim() });
-  if (source.platform.trim()) query.set("platform", source.platform.trim());
-  if (source.insecure) query.set("insecure", "true");
-  return query;
 }

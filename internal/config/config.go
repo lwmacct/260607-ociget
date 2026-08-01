@@ -20,9 +20,9 @@ var Manager = cfgm.New(DefaultConfig())
 //
 //nolint:tagliatelle // public config keys are kebab-case.
 type Server struct {
-	Database      string              `json:"database" desc:"SQLite 数据库文件路径"`
-	HTTP          ServerHTTP          `json:"http" desc:"HTTP 服务配置"`
-	DownloadCache ServerDownloadCache `json:"download-cache" desc:"下载文件缓存配置"`
+	Database   string           `json:"database" desc:"SQLite 数据库文件路径"`
+	HTTP       ServerHTTP       `json:"http" desc:"HTTP 服务配置"`
+	ImageStore ServerImageStore `json:"image-store" desc:"镜像文件系统仓库配置"`
 }
 
 // ServerHTTP contains HTTP listener settings.
@@ -33,13 +33,13 @@ type ServerHTTP struct {
 	TLS    tlsreload.Config `json:"tls" desc:"HTTPS TLS 配置"`
 }
 
-// ServerDownloadCache contains extracted download cache settings.
+// ServerImageStore contains local immutable image filesystem settings.
 //
 //nolint:tagliatelle // public config keys are kebab-case.
-type ServerDownloadCache struct {
-	Enabled bool   `json:"enabled" desc:"是否启用下载文件缓存"`
-	Dir     string `json:"dir" desc:"下载文件缓存目录"`
-	TTL     string `json:"ttl" desc:"下载文件缓存有效期, 例如 168h"`
+type ServerImageStore struct {
+	Dir      string `json:"dir" desc:"镜像文件系统仓库目录"`
+	RefTTL   string `json:"ref-ttl" desc:"可变镜像引用重新解析间隔, 例如 5m"`
+	MaxBytes int64  `json:"max-bytes" desc:"内容对象最大字节数, 0 表示不限制"`
 }
 
 // Validate checks internal field consistency.
@@ -55,32 +55,32 @@ func (h ServerHTTP) UsesTLS() bool {
 	return h.TLS.Enabled
 }
 
-// Validate checks download cache settings.
-func (c ServerDownloadCache) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
+// Validate checks image store settings.
+func (c ServerImageStore) Validate() error {
 	if c.Dir == "" {
-		return errors.New("download-cache dir is required when enabled")
+		return errors.New("image-store dir is required")
 	}
-	ttl, err := c.TTLDuration()
+	ttl, err := c.RefTTLDuration()
 	if err != nil {
 		return err
 	}
 	if ttl < 0 {
-		return errors.New("download-cache ttl must not be negative")
+		return errors.New("image-store ref-ttl must not be negative")
+	}
+	if c.MaxBytes < 0 {
+		return errors.New("image-store max-bytes must not be negative")
 	}
 	return nil
 }
 
-// TTLDuration parses the cache TTL.
-func (c ServerDownloadCache) TTLDuration() (time.Duration, error) {
-	if c.TTL == "" {
+// RefTTLDuration parses the mutable reference refresh interval.
+func (c ServerImageStore) RefTTLDuration() (time.Duration, error) {
+	if c.RefTTL == "" {
 		return 0, nil
 	}
-	ttl, err := time.ParseDuration(c.TTL)
+	ttl, err := time.ParseDuration(c.RefTTL)
 	if err != nil {
-		return 0, errors.New("download-cache ttl must be a Go duration such as 168h")
+		return 0, errors.New("image-store ref-ttl must be a Go duration such as 5m")
 	}
 	return ttl, nil
 }
@@ -105,10 +105,10 @@ func DefaultConfig() Config {
 					return config
 				}(),
 			},
-			DownloadCache: ServerDownloadCache{
-				Enabled: true,
-				Dir:     ".local/cache/downloads",
-				TTL:     "168h",
+			ImageStore: ServerImageStore{
+				Dir:      ".local/image-store",
+				RefTTL:   "5m",
+				MaxBytes: 20 * 1024 * 1024 * 1024,
 			},
 		},
 	}

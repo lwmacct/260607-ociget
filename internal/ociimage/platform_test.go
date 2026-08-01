@@ -33,3 +33,16 @@ func TestPlatformStringRequiresOSAndArchitecture(t *testing.T) {
 		t.Fatalf("String() = %q, want empty", got)
 	}
 }
+
+func TestParsePlatform(t *testing.T) {
+	platform, err := ParsePlatform("linux/arm/v7")
+	if err != nil {
+		t.Fatalf("ParsePlatform() unexpected error: %v", err)
+	}
+	if platform.OS != "linux" || platform.Architecture != "arm" || platform.Variant != "v7" {
+		t.Fatalf("ParsePlatform() = %#v", platform)
+	}
+	if _, err := ParsePlatform("linux"); err == nil {
+		t.Fatal("ParsePlatform() expected error")
+	}
+}

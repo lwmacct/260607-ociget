@@ -29,8 +29,16 @@ export interface ImageSource {
 }
 
 export interface ImageBrowserSession {
+  image: ImageMaterialized;
   directory: ImageDirectory;
   source: ImageSource;
+}
+
+export interface ImageMaterialized {
+  createdAt: string;
+  imageId: string;
+  imageRef: string;
+  platform: string;
 }
 
 export const DEFAULT_IMAGE_SOURCE: ImageSource = {

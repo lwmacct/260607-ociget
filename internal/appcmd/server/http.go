@@ -15,7 +15,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/lwmacct/260607-ociget/internal/config"
-	"github.com/lwmacct/260607-ociget/internal/imagebrowser"
+	"github.com/lwmacct/260607-ociget/internal/imagestore"
 )
 
 func newHTTPServer(cfg *config.Server, rt *runtime) *http.Server {
@@ -35,14 +35,12 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 		rt = &runtime{}
 	}
 	router := chi.NewRouter()
-	router.Get("/download", rt.handleDownload)
-	router.Get("/download/*", rt.handleDownload)
-	router.Post("/download/archive", rt.handleDownloadArchive)
-
 	apiRouter := chi.NewRouter()
+	apiRouter.Get("/images/{imageID}/file", rt.handleImageFile)
+	apiRouter.Post("/images/{imageID}/archive", rt.handleImageArchive)
 	router.Mount("/api", apiRouter)
 	api := humachi.New(apiRouter, huma.DefaultConfig("Web App Skeleton", version.AppVersion))
-	registerRoutes(api, rt.db, cfg, rt.browser)
+	registerRoutes(api, rt.db, cfg, rt.images)
 	frontend := newFrontendHTTPHandler()
 	router.NotFound(frontend.ServeHTTP)
 	return router
@@ -115,7 +113,7 @@ type metaOutput struct {
 	}
 }
 
-func registerRoutes(api huma.API, db *bun.DB, cfg *config.Server, browser *imagebrowser.Browser) {
+func registerRoutes(api huma.API, db *bun.DB, cfg *config.Server, images *imagestore.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-health",
 		Method:      http.MethodGet,
@@ -159,5 +157,5 @@ func registerRoutes(api huma.API, db *bun.DB, cfg *config.Server, browser *image
 		return out, nil
 	})
 
-	registerImageRoutes(api, browser)
+	registerImageRoutes(api, images)
 }

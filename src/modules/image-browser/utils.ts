@@ -80,12 +80,7 @@ export function sameImageSource(left: ImageSource, right: ImageSource): boolean 
     && left.insecure === right.insecure;
 }
 
-export function downloadHref(source: ImageSource, path: string): string {
-  const query = new URLSearchParams({
-    ref: source.imageRef,
-    path: normalizeImagePath(path),
-  });
-  if (source.platform) query.set("platform", source.platform);
-  if (source.insecure) query.set("insecure", "true");
-  return `/download?${query.toString()}`;
+export function downloadHref(imageId: string, path: string): string {
+  const query = new URLSearchParams({ path: normalizeImagePath(path) });
+  return `/api/images/${encodeURIComponent(imageId)}/file?${query.toString()}`;
 }
