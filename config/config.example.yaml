@@ -3,7 +3,6 @@
 
 # 服务端配置
 server:
-  database: ".local/data/app.db" # SQLite 数据库文件路径
 
   # HTTP 服务配置
   http:

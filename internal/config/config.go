@@ -20,7 +20,6 @@ var Manager = cfgm.New(DefaultConfig())
 //
 //nolint:tagliatelle // public config keys are kebab-case.
 type Server struct {
-	Database   string           `json:"database" desc:"SQLite 数据库文件路径"`
 	HTTP       ServerHTTP       `json:"http" desc:"HTTP 服务配置"`
 	ImageStore ServerImageStore `json:"image-store" desc:"镜像文件系统仓库配置"`
 }
@@ -85,7 +84,6 @@ func (c ServerImageStore) RefTTLDuration() (time.Duration, error) {
 func DefaultConfig() Config {
 	return Config{
 		Server: Server{
-			Database: ".local/data/app.db",
 			HTTP: ServerHTTP{
 				Listen: ":40248",
 				TLS: func() tlsreload.Config {
