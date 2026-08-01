@@ -1,4 +1,3 @@
-import { FolderOpenOutlined } from "@ant-design/icons";
 import {
   WorkbenchCenterState,
   WorkbenchPage,
@@ -37,11 +36,7 @@ export function ImageBrowserPage() {
       sidebarClassName="image-browser-workspace__sidebar"
       sidebarWidth={320}
     >
-      <WorkbenchPage
-        className="image-browser-page"
-        description={text.browser.description}
-        title={<span className="image-browser-page__title"><FolderOpenOutlined />{text.browser.title}</span>}
-      >
+      <WorkbenchPage className="image-browser-page">
         {browser.directoryError ? (
           <Alert
             closable

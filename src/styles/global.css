@@ -79,14 +79,11 @@
   grid-template-rows: auto;
 }
 
-.image-browser-page__title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .image-browser-page__browser {
+  display: flex;
   min-width: 0;
+  min-height: 0;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-control-radius);
@@ -165,6 +162,12 @@
 
 .file-table .ant-table {
   border: 0;
+}
+
+.file-table {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
 }
 
 .file-table .ant-table-container {
