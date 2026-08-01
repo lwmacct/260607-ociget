@@ -10,7 +10,7 @@ npm run dev
 
 Backend listens on `:40248` by default. Vite proxies `/api` to the backend.
 
-Open an image and materialize its filesystem:
+Open an image and build a local filesystem metadata index:
 
 ```bash
 curl -X POST http://localhost:40248/api/images \\
@@ -18,7 +18,7 @@ curl -X POST http://localhost:40248/api/images \\
   -d '{"ref":"<image>","platform":"linux/amd64"}'
 ```
 
-The response contains an immutable `imageId`. Browse files from that materialized image:
+The response contains an immutable `imageId`. Browse files from that metadata index; file bytes are read from the referenced registry when downloaded:
 
 ```bash
 curl "http://localhost:40248/api/images/<imageId>/entries?path=/usr/local/bin"

@@ -120,10 +120,29 @@ func (routeTestSource) Resolve(context.Context, string, ociimage.OpenOptions) (*
 		return nil, err
 	}
 	return &imagestore.ResolvedImage{
-		ImageID:  routeTestImageID,
-		Platform: "linux/amd64",
-		Layers:   []imagestore.Layer{routeTestLayer(buffer.Bytes())},
+		ManifestDigest: routeTestImageID,
+		Platform:       "linux/amd64",
+		Layers: []imagestore.ResolvedLayer{{
+			Descriptor: imagestore.LayerDescriptor{Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			Layer:      routeTestLayer(buffer.Bytes()),
+		}},
 	}, nil
+}
+
+func (routeTestSource) OpenLayer(context.Context, string, string, ociimage.OpenOptions, imagestore.LayerDescriptor) (io.ReadCloser, error) {
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	payload := []byte("payload")
+	if err := writer.WriteHeader(&tar.Header{Name: "usr/bin/app", Mode: 0o755, Size: int64(len(payload)), Typeflag: tar.TypeReg}); err != nil {
+		return nil, err
+	}
+	if _, err := writer.Write(payload); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(buffer.Bytes())), nil
 }
 
 type routeTestLayer []byte

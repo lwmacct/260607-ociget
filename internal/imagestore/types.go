@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrImageNotFound  = errors.New("image not found in store")
+	ErrImageNotFound  = errors.New("image not found in metadata store")
 	ErrNotDirectory   = errors.New("image path is not a directory")
 	ErrNotRegularFile = errors.New("image path is not a regular file")
 )
@@ -26,9 +26,8 @@ const (
 )
 
 type Config struct {
-	Dir      string
-	RefTTL   time.Duration
-	MaxBytes int64
+	Dir    string
+	RefTTL time.Duration
 }
 
 type OpenRequest struct {
@@ -39,21 +38,24 @@ type OpenRequest struct {
 }
 
 type Image struct {
-	ImageID   string    `json:"imageId"`
-	ImageRef  string    `json:"imageRef"`
-	Platform  string    `json:"platform"`
-	CreatedAt time.Time `json:"createdAt"`
+	ImageID        string    `json:"imageId"`
+	ManifestDigest string    `json:"manifestDigest"`
+	ImageRef       string    `json:"imageRef"`
+	Platform       string    `json:"platform"`
+	Insecure       bool      `json:"insecure,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type Entry struct {
-	Name          string    `json:"name"`
-	Path          string    `json:"path"`
-	Type          EntryType `json:"type"`
-	Size          int64     `json:"size"`
-	Mode          int64     `json:"mode"`
-	ModTime       time.Time `json:"modTime,omitempty"`
-	LinkName      string    `json:"linkName,omitempty"`
-	ContentDigest string    `json:"contentDigest,omitempty"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Type        EntryType `json:"type"`
+	Size        int64     `json:"size"`
+	Mode        int64     `json:"mode"`
+	ModTime     time.Time `json:"modTime,omitempty"`
+	LinkName    string    `json:"linkName,omitempty"`
+	LayerDigest string    `json:"layerDigest,omitempty"`
+	TarPath     string    `json:"tarPath,omitempty"`
 }
 
 type Directory struct {
@@ -63,19 +65,31 @@ type Directory struct {
 
 type File struct {
 	Entry  Entry
-	Reader io.ReadSeekCloser
+	Reader io.ReadCloser
 }
 
 type Layer interface {
 	Open() (io.ReadCloser, error)
 }
 
+type LayerDescriptor struct {
+	Digest    string `json:"digest"`
+	MediaType string `json:"mediaType"`
+	Size      int64  `json:"size"`
+}
+
+type ResolvedLayer struct {
+	Descriptor LayerDescriptor
+	Layer      Layer
+}
+
 type ResolvedImage struct {
-	ImageID  string
-	Platform string
-	Layers   []Layer
+	ManifestDigest string
+	Platform       string
+	Layers         []ResolvedLayer
 }
 
 type Source interface {
 	Resolve(ctx context.Context, imageRef string, opts ociimage.OpenOptions) (*ResolvedImage, error)
+	OpenLayer(ctx context.Context, imageRef, manifestDigest string, opts ociimage.OpenOptions, descriptor LayerDescriptor) (io.ReadCloser, error)
 }

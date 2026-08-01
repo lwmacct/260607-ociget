@@ -37,9 +37,8 @@ type ServerHTTP struct {
 //
 //nolint:tagliatelle // public config keys are kebab-case.
 type ServerImageStore struct {
-	Dir      string `json:"dir" desc:"镜像文件系统仓库目录"`
-	RefTTL   string `json:"ref-ttl" desc:"可变镜像引用重新解析间隔, 例如 5m"`
-	MaxBytes int64  `json:"max-bytes" desc:"内容对象最大字节数, 0 表示不限制"`
+	Dir    string `json:"dir" desc:"镜像元数据目录"`
+	RefTTL string `json:"ref-ttl" desc:"可变镜像引用重新解析间隔, 例如 5m"`
 }
 
 // Validate checks internal field consistency.
@@ -66,9 +65,6 @@ func (c ServerImageStore) Validate() error {
 	}
 	if ttl < 0 {
 		return errors.New("image-store ref-ttl must not be negative")
-	}
-	if c.MaxBytes < 0 {
-		return errors.New("image-store max-bytes must not be negative")
 	}
 	return nil
 }
@@ -105,11 +101,7 @@ func DefaultConfig() Config {
 					return config
 				}(),
 			},
-			ImageStore: ServerImageStore{
-				Dir:      ".local/image-store",
-				RefTTL:   "5m",
-				MaxBytes: 20 * 1024 * 1024 * 1024,
-			},
+			ImageStore: ServerImageStore{Dir: ".local/image-metadata", RefTTL: "5m"},
 		},
 	}
 }

@@ -86,6 +86,22 @@ func (e *Extractor) Image(ctx context.Context, imageRef string, opts OpenOptions
 	return e.remoteImage(ctx, imageRef, opts)
 }
 
+func (e *Extractor) OpenLayer(ctx context.Context, imageRef string, opts OpenOptions, digest v1.Hash) (io.ReadCloser, error) {
+	ref, remoteOpts, err := remoteReferenceOptions(ctx, imageRef, opts, opts.Insecure)
+	if err != nil {
+		return nil, err
+	}
+	digestRef, err := name.NewDigest(ref.Context().Name()+"@"+digest.String(), nameOptions(opts.Insecure)...)
+	if err != nil {
+		return nil, fmt.Errorf("parse layer digest: %w", err)
+	}
+	layer, err := remote.Layer(digestRef, remoteOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return layer.Uncompressed()
+}
+
 func (e *Extractor) Platforms(ctx context.Context, imageRef string, opts OpenOptions) ([]Platform, error) {
 	desc, err := e.remoteDescriptor(ctx, imageRef, opts)
 	if err != nil {
@@ -192,6 +208,13 @@ func pullRemoteImage(ctx context.Context, imageRef string, opts OpenOptions, ins
 		return nil, err
 	}
 	return remote.Image(ref, remoteOpts...)
+}
+
+func nameOptions(insecure bool) []name.Option {
+	if insecure {
+		return []name.Option{name.Insecure}
+	}
+	return nil
 }
 
 func pullRemoteDescriptor(ctx context.Context, imageRef string, opts OpenOptions, insecure bool) (*remote.Descriptor, error) {

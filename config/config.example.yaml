@@ -26,6 +26,5 @@ server:
 
   # 镜像文件系统仓库配置
   image-store:
-    dir: ".local/image-store" # 镜像文件系统仓库目录
+    dir: ".local/image-metadata" # 镜像元数据目录
     ref-ttl: "5m" # 可变镜像引用重新解析间隔, 例如 5m
-    max-bytes: 21474836480 # 内容对象最大字节数, 0 表示不限制

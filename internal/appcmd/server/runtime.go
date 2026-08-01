@@ -48,9 +48,8 @@ func newRuntime(ctx context.Context, cfg *config.Server) (_ *runtime, err error)
 		return nil, err
 	}
 	rt.images, err = imagestore.New(imagestore.Config{
-		Dir:      cfg.ImageStore.Dir,
-		RefTTL:   refTTL,
-		MaxBytes: cfg.ImageStore.MaxBytes,
+		Dir:    cfg.ImageStore.Dir,
+		RefTTL: refTTL,
 	})
 	if err != nil {
 		return nil, err

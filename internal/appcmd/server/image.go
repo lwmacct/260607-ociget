@@ -26,7 +26,7 @@ type createImageOutput struct {
 }
 
 type listImageEntriesInput struct {
-	ImageID string `path:"imageID" doc:"Immutable image manifest digest"`
+	ImageID string `path:"imageID" doc:"Immutable source-bound metadata image identifier"`
 	Path    string `query:"path" default:"/" doc:"Directory path inside the image"`
 }
 
@@ -50,7 +50,7 @@ func registerImageRoutes(api huma.API, images *imagestore.Store) {
 		OperationID: "create-image",
 		Method:      http.MethodPost,
 		Path:        "/images",
-		Summary:     "Resolve and materialize an image filesystem",
+		Summary:     "Resolve an image and index its filesystem metadata",
 		Tags:        []string{"images"},
 	}, func(ctx context.Context, input *createImageInput) (*createImageOutput, error) {
 		if images == nil {
@@ -81,7 +81,7 @@ func registerImageRoutes(api huma.API, images *imagestore.Store) {
 		OperationID: "list-image-entries",
 		Method:      http.MethodGet,
 		Path:        "/images/{imageID}/entries",
-		Summary:     "List a materialized image directory",
+		Summary:     "List an indexed image directory",
 		Tags:        []string{"images"},
 	}, func(_ context.Context, input *listImageEntriesInput) (*listImageEntriesOutput, error) {
 		if images == nil {
@@ -123,6 +123,6 @@ func imageStoreAPIError(err error) error {
 	case errors.Is(err, imagestore.ErrNotRegularFile):
 		return huma.Error422UnprocessableEntity("path is not a regular file")
 	default:
-		return huma.Error502BadGateway("failed to materialize image")
+		return huma.Error502BadGateway("failed to index image metadata")
 	}
 }

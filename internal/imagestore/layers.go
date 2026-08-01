@@ -3,27 +3,23 @@ package imagestore
 import (
 	"archive/tar"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 )
 
-func (s *Store) applyLayers(ctx context.Context, index *imageIndex, layers []Layer) error {
-	for layerIndex, layer := range layers {
+func applyLayers(ctx context.Context, index *imageIndex, layers []ResolvedLayer) error {
+	for layerIndex, resolved := range layers {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rc, err := layer.Open()
+		rc, err := resolved.Layer.Open()
 		if err != nil {
 			return fmt.Errorf("open layer %d: %w", layerIndex, err)
 		}
-		err = s.applyLayer(ctx, index, rc)
+		err = applyLayer(ctx, index, rc, resolved.Descriptor)
 		closeErr := rc.Close()
 		if err != nil {
 			return fmt.Errorf("scan layer %d: %w", layerIndex, err)
@@ -35,14 +31,14 @@ func (s *Store) applyLayers(ctx context.Context, index *imageIndex, layers []Lay
 	return nil
 }
 
-func (s *Store) applyLayer(ctx context.Context, index *imageIndex, reader io.Reader) error {
-	tarReader := tar.NewReader(reader)
+func applyLayer(ctx context.Context, index *imageIndex, reader io.Reader, descriptor LayerDescriptor) error {
+	tr := tar.NewReader(reader)
 	currentLayer := map[string]struct{}{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		header, err := tarReader.Next()
+		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -56,49 +52,33 @@ func (s *Store) applyLayer(ctx context.Context, index *imageIndex, reader io.Rea
 		if applyWhiteout(index.Entries, entryPath, currentLayer) {
 			continue
 		}
-		if err := s.applyHeader(index.Entries, header, entryPath, tarReader); err != nil {
-			return err
-		}
+		applyHeader(index.Entries, header, entryPath, descriptor)
 		currentLayer[entryPath] = struct{}{}
 	}
 }
 
-func (s *Store) applyHeader(entries map[string]Entry, header *tar.Header, entryPath string, body io.Reader) error {
+func applyHeader(entries map[string]Entry, header *tar.Header, entryPath string, descriptor LayerDescriptor) {
 	ensureParents(entries, entryPath)
 	entry := Entry{
-		Name:     path.Base(entryPath),
-		Path:     entryPath,
-		Size:     header.Size,
-		Mode:     header.Mode,
-		ModTime:  header.ModTime,
-		LinkName: header.Linkname,
+		Name: path.Base(entryPath), Path: entryPath, Size: header.Size, Mode: header.Mode,
+		ModTime: header.ModTime, LinkName: header.Linkname,
 	}
 	switch header.Typeflag {
 	case tar.TypeDir:
-		entry.Type = EntryTypeDirectory
-		entry.Size = -1
+		entry.Type, entry.Size = EntryTypeDirectory, -1
 	case tar.TypeReg, tar.TypeRegA:
-		entry.Type = EntryTypeFile
-		digest, size, err := s.putObject(body)
-		if err != nil {
-			return fmt.Errorf("store %s: %w", entryPath, err)
-		}
-		entry.ContentDigest = digest
-		entry.Size = size
+		entry.Type, entry.LayerDigest, entry.TarPath = EntryTypeFile, descriptor.Digest, strings.TrimPrefix(normalizeLayerPath(header.Name), "/")
 	case tar.TypeSymlink:
-		entry.Type = EntryTypeSymlink
-		entry.Size = 0
+		entry.Type, entry.Size = EntryTypeSymlink, 0
 	case tar.TypeLink:
 		target := normalizeLayerPath(header.Linkname)
 		linked, ok := entries[target]
-		if !ok || linked.Type != EntryTypeFile || linked.ContentDigest == "" {
-			entry.Type = EntryTypeOther
-			entry.Size = 0
+		if !ok || linked.Type != EntryTypeFile || linked.LayerDigest == "" {
+			entry.Type, entry.Size = EntryTypeOther, 0
 			break
 		}
-		entry.Type = EntryTypeFile
-		entry.Size = linked.Size
-		entry.ContentDigest = linked.ContentDigest
+		entry.Type, entry.Size = EntryTypeFile, linked.Size
+		entry.LayerDigest, entry.TarPath = linked.LayerDigest, linked.TarPath
 	default:
 		entry.Type = EntryTypeOther
 	}
@@ -106,56 +86,56 @@ func (s *Store) applyHeader(entries map[string]Entry, header *tar.Header, entryP
 		deleteSubtree(entries, entryPath, false)
 	}
 	entries[entryPath] = entry
-	return nil
 }
 
-func (s *Store) putObject(reader io.Reader) (string, int64, error) {
-	tmp, err := os.CreateTemp(filepath.Join(s.dir, "objects", "sha256"), ".object-*.tmp")
-	if err != nil {
-		return "", 0, err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	hash := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, hash), reader)
-	if err != nil {
-		_ = tmp.Close()
-		return "", 0, err
-	}
-	if err := tmp.Close(); err != nil {
-		return "", 0, err
-	}
-	digest := hex.EncodeToString(hash.Sum(nil))
-	final := s.objectPath(digest)
-	if _, err := os.Stat(final); err == nil {
-		return digest, size, nil
-	}
-	if err := os.Rename(tmpName, final); err != nil {
-		if _, statErr := os.Stat(final); statErr != nil {
-			return "", 0, err
+func openFileFromLayer(rc io.ReadCloser, tarPath, target string) (*File, error) {
+	tr := tar.NewReader(rc)
+	for {
+		header, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			_ = rc.Close()
+			return nil, ErrImageNotFound
 		}
+		if err != nil {
+			_ = rc.Close()
+			return nil, err
+		}
+		if normalizeLayerPath(header.Name) != normalizeLayerPath(tarPath) {
+			continue
+		}
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+			_ = rc.Close()
+			return nil, ErrNotRegularFile
+		}
+		return &File{Entry: Entry{Path: target, Size: header.Size, Mode: header.Mode, ModTime: header.ModTime}, Reader: &layerFileReader{Reader: tr, closer: rc}}, nil
 	}
-	return digest, size, nil
 }
+
+type layerFileReader struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (r *layerFileReader) Close() error { return r.closer.Close() }
 
 func normalizePath(input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" || input == "/" || input == "." {
 		return "/", nil
 	}
-	if strings.ContainsRune(input, '\x00') {
+	if strings.ContainsRune(input, '\x00') || strings.Contains(input, "\\") {
 		return "", fmt.Errorf("invalid image path")
 	}
-	cleaned := path.Clean("/" + input)
-	if cleaned == "/" {
-		return "/", nil
+	for _, part := range strings.Split(input, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("invalid image path")
+		}
 	}
-	return cleaned, nil
+	return path.Clean("/" + input), nil
 }
 
 func normalizeLayerPath(input string) string {
-	input = strings.TrimSpace(input)
-	input = strings.TrimPrefix(input, "./")
+	input = strings.TrimPrefix(strings.TrimSpace(input), "./")
 	cleaned := path.Clean("/" + input)
 	if cleaned == "/" || cleaned == "/." {
 		return ""
@@ -173,12 +153,10 @@ func ensureParents(entries map[string]Entry, entryPath string) {
 		missing = append(missing, parent)
 		parent = parentPath(parent)
 	}
-	for index := len(missing) - 1; index >= 0; index-- {
-		current := missing[index]
+	for i := len(missing) - 1; i >= 0; i-- {
+		current := missing[i]
 		deleteSubtree(entries, current, false)
-		entries[current] = Entry{
-			Name: path.Base(current), Path: current, Type: EntryTypeDirectory, Size: -1,
-		}
+		entries[current] = Entry{Name: path.Base(current), Path: current, Type: EntryTypeDirectory, Size: -1}
 	}
 }
 
@@ -193,23 +171,18 @@ func parentPath(entryPath string) string {
 func applyWhiteout(entries map[string]Entry, entryPath string, currentLayer map[string]struct{}) bool {
 	base := path.Base(entryPath)
 	if base == ".wh..wh..opq" {
-		dir := parentPath(entryPath)
-		deleteLowerSubtree(entries, dir, true, currentLayer)
+		deleteLowerSubtree(entries, parentPath(entryPath), true, currentLayer)
 		return true
 	}
 	if !strings.HasPrefix(base, ".wh.") {
 		return false
 	}
-	target := path.Join(parentPath(entryPath), strings.TrimPrefix(base, ".wh."))
-	deleteLowerSubtree(entries, target, false, currentLayer)
+	deleteLowerSubtree(entries, path.Join(parentPath(entryPath), strings.TrimPrefix(base, ".wh.")), false, currentLayer)
 	return true
 }
 
 func deleteLowerSubtree(entries map[string]Entry, target string, descendantsOnly bool, currentLayer map[string]struct{}) {
 	prefix := target + "/"
-	if target == "/" {
-		prefix = "/"
-	}
 	for candidate := range entries {
 		if candidate != target && !strings.HasPrefix(candidate, prefix) {
 			continue
@@ -238,9 +211,6 @@ func protectedByCurrentLayer(candidate string, currentLayer map[string]struct{})
 
 func deleteSubtree(entries map[string]Entry, target string, descendantsOnly bool) {
 	prefix := target + "/"
-	if target == "/" {
-		prefix = "/"
-	}
 	for candidate := range entries {
 		if strings.HasPrefix(candidate, prefix) || (!descendantsOnly && candidate == target) {
 			delete(entries, candidate)

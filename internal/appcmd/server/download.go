@@ -2,6 +2,7 @@ package server
 
 import (
 	"archive/tar"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,12 +33,7 @@ func (app *runtime) handleImageFile(w http.ResponseWriter, r *http.Request) {
 		writeImageStoreError(w, err)
 		return
 	}
-	defer file.Reader.Close()
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, headerFilename(file.Entry.Name)))
-	w.Header().Set("ETag", strconv.Quote("sha256:"+file.Entry.ContentDigest))
-	http.ServeContent(w, r, file.Entry.Name, file.Entry.ModTime, file.Reader)
+	app.serveImageFile(w, r, imageID, file, imagestore.OpenRequest{ImageRef: ""})
 }
 
 func (app *runtime) handleImagePathDownload(w http.ResponseWriter, r *http.Request) {
@@ -65,12 +61,90 @@ func (app *runtime) handleImagePathDownload(w http.ResponseWriter, r *http.Reque
 		writeImagePathError(w, err)
 		return
 	}
-	defer file.Reader.Close()
+	app.serveImageFile(w, r, image.ImageID, file, options.openRequest(imageRef))
+}
 
+func (app *runtime) serveImageFile(w http.ResponseWriter, r *http.Request, imageID string, file *imagestore.File, request imagestore.OpenRequest) {
+	entry := file.Entry
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, headerFilename(file.Entry.Name)))
-	w.Header().Set("ETag", strconv.Quote("sha256:"+file.Entry.ContentDigest))
-	http.ServeContent(w, r, file.Entry.Name, file.Entry.ModTime, file.Reader)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, headerFilename(entry.Name)))
+	etag := sha256.Sum256([]byte(imageID + "\n" + entry.Path + "\n" + strconv.FormatInt(entry.Size, 10)))
+	w.Header().Set("ETag", strconv.Quote("sha256:"+fmt.Sprintf("%x", etag[:])))
+	if !entry.ModTime.IsZero() {
+		w.Header().Set("Last-Modified", entry.ModTime.UTC().Format(http.TimeFormat))
+	}
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", strconv.FormatInt(entry.Size, 10))
+		return
+	}
+	start, length, partial, err := imageRange(r.Header.Get("Range"), entry.Size)
+	if err != nil {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", entry.Size))
+		http.Error(w, "invalid range", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	var opened *imagestore.File
+	if request.ImageRef != "" {
+		opened, err = app.images.OpenFileForRequest(r.Context(), imageID, entry.Path, request)
+	} else {
+		opened, err = app.images.OpenFileReader(r.Context(), imageID, entry.Path)
+	}
+	if err != nil {
+		writeImagePathError(w, err)
+		return
+	}
+	defer opened.Reader.Close()
+	if partial {
+		if _, err := io.CopyN(io.Discard, opened.Reader, start); err != nil {
+			http.Error(w, "failed to seek image file", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, entry.Size))
+		w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = io.CopyN(w, opened.Reader, length)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(entry.Size, 10))
+	_, _ = io.CopyN(w, opened.Reader, entry.Size)
+}
+
+func imageRange(value string, size int64) (int64, int64, bool, error) {
+	if value == "" {
+		return 0, size, false, nil
+	}
+	if !strings.HasPrefix(value, "bytes=") || strings.Contains(value, ",") {
+		return 0, 0, false, errors.New("unsupported range")
+	}
+	parts := strings.SplitN(strings.TrimPrefix(value, "bytes="), "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false, errors.New("invalid range")
+	}
+	if parts[0] == "" {
+		suffix, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || suffix <= 0 {
+			return 0, 0, false, errors.New("invalid range")
+		}
+		if suffix > size {
+			suffix = size
+		}
+		return size - suffix, suffix, true, nil
+	}
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || start < 0 || start >= size {
+		return 0, 0, false, errors.New("invalid range")
+	}
+	end := size - 1
+	if parts[1] != "" {
+		end, err = strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || end < start {
+			return 0, 0, false, errors.New("invalid range")
+		}
+		if end >= size {
+			end = size - 1
+		}
+	}
+	return start, end - start + 1, true, nil
 }
 
 func (app *runtime) handleImageArchive(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +160,7 @@ func (app *runtime) handleImageArchive(w http.ResponseWriter, r *http.Request) {
 	imageID := chi.URLParam(r, "imageID")
 	files := make([]*imagestore.File, 0, len(input.Paths))
 	for _, filePath := range input.Paths {
-		file, err := app.images.OpenFile(imageID, filePath)
+		_, err := app.images.OpenFile(imageID, filePath)
 		if err != nil {
 			for _, opened := range files {
 				_ = opened.Reader.Close()
@@ -94,7 +168,15 @@ func (app *runtime) handleImageArchive(w http.ResponseWriter, r *http.Request) {
 			writeImageStoreError(w, err)
 			return
 		}
-		files = append(files, file)
+		opened, openErr := app.images.OpenFileReader(r.Context(), imageID, filePath)
+		if openErr != nil {
+			for _, openedFile := range files {
+				_ = openedFile.Reader.Close()
+			}
+			writeImageStoreError(w, openErr)
+			return
+		}
+		files = append(files, opened)
 	}
 	defer func() {
 		for _, file := range files {
