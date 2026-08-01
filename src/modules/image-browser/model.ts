@@ -42,7 +42,7 @@ export interface ImageMaterialized {
 }
 
 export const DEFAULT_IMAGE_SOURCE: ImageSource = {
-  imageRef: "alpine:latest",
+  imageRef: "ghcr.io/lwmacct/260607-ociget:latest",
   insecure: false,
   platform: "linux/amd64",
 };

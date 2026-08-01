@@ -17,7 +17,7 @@ const materializeMock = vi.mocked(materializeImage);
 
 const image = {
   imageId: "sha256:abc",
-  imageRef: "alpine:latest",
+  imageRef: "ghcr.io/lwmacct/260607-ociget:latest",
   platform: "linux/amd64",
   createdAt: "2026-08-01T00:00:00Z",
 };
@@ -34,7 +34,7 @@ describe("useImageBrowserSession", () => {
 
     expect(result.current.session).toEqual({
       image,
-      source: { imageRef: "alpine:latest", platform: "linux/amd64", insecure: false },
+      source: { imageRef: "ghcr.io/lwmacct/260607-ociget:latest", platform: "linux/amd64", insecure: false },
       directory: { path: "/", entries: [] },
     });
     expect(listFilesMock).toHaveBeenCalledWith("sha256:abc", "/", expect.any(AbortSignal));

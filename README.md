@@ -27,7 +27,7 @@ curl "http://localhost:40248/api/images/<imageId>/entries?path=/usr/local/bin"
 For direct downloads, use the compact root URL form. The first `/-/` separates the OCI image reference from the file path:
 
 ```bash
-wget "http://localhost:40248/ghcr.io/lwmacct/260606-sshrt:v0.129.260607/-/usr/local/bin/app"
+wget "http://localhost:40248/ghcr.io/lwmacct/260607-ociget:latest/-/usr/local/bin/app"
 ```
 
 Optional query parameters are `platform=linux/amd64`, `insecure=1`, and `refresh=1` (to resolve a mutable tag again).
