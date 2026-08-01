@@ -1,5 +1,5 @@
 {
-  "name": "webapp-web",
+  "name": "@lwmacct/260607-ociget",
   "version": "0.18.260801",
   "packageManager": "pnpm@11.18.0",
   "private": true,

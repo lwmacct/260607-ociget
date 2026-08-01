@@ -38,7 +38,7 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 	apiRouter.Get("/images/{imageID}/file", rt.handleImageFile)
 	apiRouter.Post("/images/{imageID}/archive", rt.handleImageArchive)
 	router.Mount("/api", apiRouter)
-	api := humachi.New(apiRouter, huma.DefaultConfig("Web App Skeleton", version.AppVersion))
+	api := humachi.New(apiRouter, huma.DefaultConfig("OCIGet", version.AppVersion))
 	registerRoutes(api, cfg, rt.images)
 	frontend := newFrontendHTTPHandler()
 	rootHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -108,16 +108,16 @@ func fileExists(fs http.FileSystem, urlPath string) bool {
 type healthOutput struct {
 	Body struct {
 		Status  string `json:"status" example:"ok"`
-		Version string `json:"version" example:"0.1.0"`
+		Version string `json:"version" example:"v0.17.260801"`
 		Time    string `json:"time" example:"2026-06-05T12:00:00Z"`
 	}
 }
 
 type metaOutput struct {
 	Body struct {
-		Name     string `json:"name" example:"Web App Skeleton"`
-		Version  string `json:"version" example:"0.1.0"`
-		Listen   string `json:"listen" example:":8080"`
+		Name     string `json:"name" example:"OCIGet"`
+		Version  string `json:"version" example:"v0.17.260801"`
+		Listen   string `json:"listen" example:":40248"`
 		DocsPath string `json:"docsPath" example:"/api"`
 	}
 }
@@ -145,7 +145,7 @@ func registerRoutes(api huma.API, cfg *config.Server, images *imagestore.Store) 
 		Tags:        []string{"system"},
 	}, func(context.Context, *struct{}) (*metaOutput, error) {
 		out := &metaOutput{}
-		out.Body.Name = "Web App Skeleton"
+		out.Body.Name = "OCIGet"
 		out.Body.Version = version.AppVersion
 		out.Body.Listen = cfg.HTTP.Listen
 		out.Body.DocsPath = "/api"
