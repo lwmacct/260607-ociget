@@ -22,27 +22,60 @@ export interface ImagePlatform {
   variant?: string;
 }
 
-export interface ImageSource {
-  imageRef: string;
+export interface OCISource {
   insecure: boolean;
   platform: string;
+  reference: string;
 }
 
-export interface ImageBrowserSession {
-  image: ImageMaterialized;
-  directory: ImageDirectory;
-  source: ImageSource;
-}
-
-export interface ImageMaterialized {
+interface OCIObjectBase {
+  annotations?: Record<string, string>;
   createdAt: string;
-  imageId: string;
-  imageRef: string;
+  insecure?: boolean;
+  manifestDigest: string;
+  manifestMediaType: string;
+  objectId: string;
+  reference: string;
+}
+
+export interface OCIImageObject extends OCIObjectBase {
+  kind: "image";
   platform: string;
 }
 
-export const DEFAULT_IMAGE_SOURCE: ImageSource = {
-  imageRef: "ghcr.io/lwmacct/260607-ociget:latest",
+export interface ArtifactBlob {
+  annotations?: Record<string, string>;
+  digest: string;
+  mediaType: string;
+  name: string;
+  size: number;
+}
+
+export interface OCIArtifactObject extends OCIObjectBase {
+  artifactType: string;
+  blobs: ArtifactBlob[];
+  kind: "artifact";
+}
+
+export type OCIObject = OCIImageObject | OCIArtifactObject;
+
+export interface ImageBrowserSession {
+  directory: ImageDirectory;
+  kind: "image";
+  object: OCIImageObject;
+  source: OCISource;
+}
+
+export interface ArtifactSession {
+  kind: "artifact";
+  object: OCIArtifactObject;
+  source: OCISource;
+}
+
+export type BrowserSession = ImageBrowserSession | ArtifactSession;
+
+export const DEFAULT_OCI_SOURCE: OCISource = {
   insecure: false,
   platform: "linux/amd64",
+  reference: "ghcr.io/lwmacct/260607-ociget:latest",
 };

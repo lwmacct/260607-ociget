@@ -1,4 +1,4 @@
-import { DEFAULT_IMAGE_SOURCE, type EntryType, type ImagePlatform, type ImageSource } from "./model";
+import { DEFAULT_OCI_SOURCE, type EntryType, type ImagePlatform, type OCISource } from "./model";
 
 export interface PathCrumb {
   label: string;
@@ -66,26 +66,26 @@ export function platformValue(platform: ImagePlatform): string {
 export function choosePlatform(platforms: ImagePlatform[], current: string): string {
   const values = platforms.map(platformValue).filter(Boolean);
   if (current && values.includes(current)) return current;
-  if (values.includes(DEFAULT_IMAGE_SOURCE.platform)) return DEFAULT_IMAGE_SOURCE.platform;
+  if (values.includes(DEFAULT_OCI_SOURCE.platform)) return DEFAULT_OCI_SOURCE.platform;
   return values[0] ?? current;
 }
 
-export function sourceKey(source: Pick<ImageSource, "imageRef" | "insecure">): string {
-  return `${source.insecure ? "insecure" : "secure"}:${source.imageRef.trim()}`;
+export function sourceKey(source: Pick<OCISource, "reference" | "insecure">): string {
+  return `${source.insecure ? "insecure" : "secure"}:${source.reference.trim()}`;
 }
 
-export function sameImageSource(left: ImageSource, right: ImageSource): boolean {
-  return left.imageRef === right.imageRef
+export function sameImageSource(left: OCISource, right: OCISource): boolean {
+  return left.reference === right.reference
     && left.platform === right.platform
     && left.insecure === right.insecure;
 }
 
-export function downloadHref(source: Pick<ImageSource, "imageRef" | "platform" | "insecure">, path: string): string {
+export function downloadHref(source: Pick<OCISource, "reference" | "platform" | "insecure">, path: string): string {
   const query = new URLSearchParams();
   if (source.platform.trim()) query.set("platform", source.platform.trim());
   if (source.insecure) query.set("insecure", "1");
   const suffix = query.toString();
-  const imageRef = source.imageRef.trim().split("/")
+  const imageRef = source.reference.trim().split("/")
     .map((segment) => encodeURIComponent(segment).replace(/%3A/gi, ":").replace(/%40/gi, "@"))
     .join("/");
   return `/${imageRef}/-/${normalizeImagePath(path).replace(/^\//, "")}${suffix ? `?${suffix}` : ""}`;

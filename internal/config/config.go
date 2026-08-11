@@ -20,8 +20,8 @@ var Manager = cfgm.New(DefaultConfig())
 //
 //nolint:tagliatelle // public config keys are kebab-case.
 type Server struct {
-	HTTP       ServerHTTP       `json:"http" desc:"HTTP 服务配置"`
-	ImageStore ServerImageStore `json:"image-store" desc:"镜像文件系统仓库配置"`
+	HTTP     ServerHTTP     `json:"http" desc:"HTTP 服务配置"`
+	OCIStore ServerOCIStore `json:"oci-store" desc:"OCI 对象元数据仓库配置"`
 }
 
 // ServerHTTP contains HTTP listener settings.
@@ -32,12 +32,12 @@ type ServerHTTP struct {
 	TLS    tlsreload.Config `json:"tls" desc:"HTTPS TLS 配置"`
 }
 
-// ServerImageStore contains local immutable image filesystem settings.
+// ServerOCIStore contains local immutable OCI object metadata settings.
 //
 //nolint:tagliatelle // public config keys are kebab-case.
-type ServerImageStore struct {
-	Dir    string `json:"dir" desc:"镜像元数据目录"`
-	RefTTL string `json:"ref-ttl" desc:"可变镜像引用重新解析间隔, 例如 5m"`
+type ServerOCIStore struct {
+	Dir    string `json:"dir" desc:"OCI 对象元数据目录"`
+	RefTTL string `json:"ref-ttl" desc:"可变 OCI 引用重新解析间隔, 例如 5m"`
 }
 
 // Validate checks internal field consistency.
@@ -53,29 +53,29 @@ func (h ServerHTTP) UsesTLS() bool {
 	return h.TLS.Enabled
 }
 
-// Validate checks image store settings.
-func (c ServerImageStore) Validate() error {
+// Validate checks OCI store settings.
+func (c ServerOCIStore) Validate() error {
 	if c.Dir == "" {
-		return errors.New("image-store dir is required")
+		return errors.New("oci-store dir is required")
 	}
 	ttl, err := c.RefTTLDuration()
 	if err != nil {
 		return err
 	}
 	if ttl < 0 {
-		return errors.New("image-store ref-ttl must not be negative")
+		return errors.New("oci-store ref-ttl must not be negative")
 	}
 	return nil
 }
 
 // RefTTLDuration parses the mutable reference refresh interval.
-func (c ServerImageStore) RefTTLDuration() (time.Duration, error) {
+func (c ServerOCIStore) RefTTLDuration() (time.Duration, error) {
 	if c.RefTTL == "" {
 		return 0, nil
 	}
 	ttl, err := time.ParseDuration(c.RefTTL)
 	if err != nil {
-		return 0, errors.New("image-store ref-ttl must be a Go duration such as 5m")
+		return 0, errors.New("oci-store ref-ttl must be a Go duration such as 5m")
 	}
 	return ttl, nil
 }
@@ -99,7 +99,7 @@ func DefaultConfig() Config {
 					return config
 				}(),
 			},
-			ImageStore: ServerImageStore{Dir: ".local/image-metadata", RefTTL: "5m"},
+			OCIStore: ServerOCIStore{Dir: ".local/oci-metadata", RefTTL: "5m"},
 		},
 	}
 }

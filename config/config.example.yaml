@@ -23,7 +23,7 @@ server:
       poll-jitter-ratio: 0.1 # 成功轮询后的向下随机抖动比例
       allow-insecure-http: false # 允许通过明文 HTTP 读取证书材料
 
-  # 镜像文件系统仓库配置
-  image-store:
-    dir: ".local/image-metadata" # 镜像元数据目录
-    ref-ttl: "5m" # 可变镜像引用重新解析间隔, 例如 5m
+  # OCI 对象元数据仓库配置
+  oci-store:
+    dir: ".local/oci-metadata" # OCI 对象元数据目录
+    ref-ttl: "5m" # 可变 OCI 引用重新解析间隔, 例如 5m

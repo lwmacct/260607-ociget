@@ -79,7 +79,7 @@ func validateConfig(cfg *config.Server) error {
 	if err := cfg.HTTP.Validate(); err != nil {
 		return err
 	}
-	if err := cfg.ImageStore.Validate(); err != nil {
+	if err := cfg.OCIStore.Validate(); err != nil {
 		return err
 	}
 	return nil

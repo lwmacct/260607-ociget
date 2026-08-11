@@ -87,6 +87,14 @@ func (e *Extractor) Image(ctx context.Context, imageRef string, opts OpenOptions
 }
 
 func (e *Extractor) OpenLayer(ctx context.Context, imageRef string, opts OpenOptions, digest v1.Hash) (io.ReadCloser, error) {
+	return e.openRemoteLayer(ctx, imageRef, opts, digest, true)
+}
+
+func (e *Extractor) OpenBlob(ctx context.Context, imageRef string, opts OpenOptions, digest v1.Hash) (io.ReadCloser, error) {
+	return e.openRemoteLayer(ctx, imageRef, opts, digest, false)
+}
+
+func (e *Extractor) openRemoteLayer(ctx context.Context, imageRef string, opts OpenOptions, digest v1.Hash, uncompressed bool) (io.ReadCloser, error) {
 	ref, remoteOpts, err := remoteReferenceOptions(ctx, imageRef, opts, opts.Insecure)
 	if err != nil {
 		return nil, err
@@ -99,7 +107,10 @@ func (e *Extractor) OpenLayer(ctx context.Context, imageRef string, opts OpenOpt
 	if err != nil {
 		return nil, err
 	}
-	return layer.Uncompressed()
+	if uncompressed {
+		return layer.Uncompressed()
+	}
+	return layer.Compressed()
 }
 
 func (e *Extractor) Platforms(ctx context.Context, imageRef string, opts OpenOptions) ([]Platform, error) {

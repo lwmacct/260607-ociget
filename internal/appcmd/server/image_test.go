@@ -9,22 +9,23 @@ import (
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
-func TestImageStoreAPIError(t *testing.T) {
+func TestObjectStoreAPIError(t *testing.T) {
 	tests := []struct {
 		err    error
 		status int
 	}{
 		{err: ociimage.ErrInvalidPath, status: http.StatusBadRequest},
 		{err: ociimage.ErrNotFound, status: http.StatusNotFound},
-		{err: imagestore.ErrImageNotFound, status: http.StatusNotFound},
+		{err: imagestore.ErrObjectNotFound, status: http.StatusNotFound},
+		{err: imagestore.ErrNotImage, status: http.StatusUnprocessableEntity},
 		{err: imagestore.ErrNotDirectory, status: http.StatusUnprocessableEntity},
 		{err: errors.New("registry failed"), status: http.StatusBadGateway},
 	}
 	for _, test := range tests {
-		err := imageStoreAPIError(test.err)
+		err := objectStoreAPIError(test.err)
 		statusErr, ok := err.(interface{ GetStatus() int })
 		if !ok {
-			t.Fatalf("imageStoreAPIError() = %T", err)
+			t.Fatalf("objectStoreAPIError() = %T", err)
 		}
 		if statusErr.GetStatus() != test.status {
 			t.Fatalf("status = %d, want %d", statusErr.GetStatus(), test.status)

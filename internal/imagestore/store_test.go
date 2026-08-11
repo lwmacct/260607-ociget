@@ -16,8 +16,8 @@ import (
 
 const testManifestDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-func TestStoreIndexesMergedFilesystemWithoutFileObjects(t *testing.T) {
-	source := newFakeSource(t,
+func TestStoreIndexesMergedImageFilesystem(t *testing.T) {
+	source := newFakeImageSource(t,
 		tarEntry{name: "etc/config", body: "base"}, tarEntry{name: "etc/old", body: "old"},
 		tarEntry{name: "var/data/item", body: "shared"},
 	)
@@ -29,29 +29,25 @@ func TestStoreIndexesMergedFilesystemWithoutFileObjects(t *testing.T) {
 	})
 	source.layers["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"] = source.resolved.Layers[1].Layer.(memoryLayer)
 	store := testStore(t, source)
-	image, err := store.Open(context.Background(), OpenRequest{ImageRef: "example.test/tool:v1"})
+	object, err := store.Open(context.Background(), OpenRequest{Reference: "example.test/tool:v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, err := store.List(image.ImageID, "/etc")
+	if object.Kind != ObjectKindImage {
+		t.Fatalf("kind = %q, want image", object.Kind)
+	}
+	directory, err := store.List(object.ObjectID, "/etc")
 	if err != nil || len(directory.Entries) != 1 || directory.Entries[0].Path != "/etc/config" {
 		t.Fatalf("directory = %#v, error = %v", directory, err)
 	}
-	entry, err := store.OpenFile(image.ImageID, "/etc/config")
+	entry, err := store.OpenFile(object.ObjectID, "/etc/config")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if entry.Entry.LayerDigest == "" || entry.Entry.TarPath != "etc/config" {
 		t.Fatalf("entry = %#v", entry.Entry)
 	}
-	objects, err := filepath.Glob(filepath.Join(store.dir, "objects", "*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(objects) != 0 {
-		t.Fatalf("metadata store created file objects: %v", objects)
-	}
-	reader, err := store.OpenFileReader(context.Background(), image.ImageID, "/etc/config")
+	reader, err := store.OpenFileReader(context.Background(), object.ObjectID, "/etc/config")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,14 +58,48 @@ func TestStoreIndexesMergedFilesystemWithoutFileObjects(t *testing.T) {
 	}
 }
 
+func TestStoreIndexesArtifactWithoutFetchingPayload(t *testing.T) {
+	source := newFakeArtifactSource([]byte("raw-elf"))
+	store := testStore(t, source)
+	object, err := store.Open(context.Background(), OpenRequest{Reference: "example.test/tool:artifact"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if object.Kind != ObjectKindArtifact || object.ArtifactType != "application/vnd.example.binary" {
+		t.Fatalf("object = %#v", object)
+	}
+	if len(object.Blobs) != 1 || object.Blobs[0].Name != "rtty" {
+		t.Fatalf("blobs = %#v", object.Blobs)
+	}
+	if source.blobOpenCount() != 0 {
+		t.Fatalf("blob opened while indexing: %d", source.blobOpenCount())
+	}
+	if _, err := store.List(object.ObjectID, "/"); err != ErrNotImage {
+		t.Fatalf("List() error = %v, want ErrNotImage", err)
+	}
+
+	blob, err := store.OpenArtifactBlob(context.Background(), object.ObjectID, object.Blobs[0].Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(blob.Reader)
+	_ = blob.Reader.Close()
+	if string(body) != "raw-elf" {
+		t.Fatalf("blob = %q, want raw-elf", body)
+	}
+	if _, err := store.OpenArtifactBlob(context.Background(), object.ObjectID, "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"); err != ErrBlobNotFound {
+		t.Fatalf("unlisted blob error = %v, want ErrBlobNotFound", err)
+	}
+}
+
 func TestStorePersistsReferenceMapping(t *testing.T) {
 	root := t.TempDir()
-	source := newFakeSource(t, tarEntry{name: "file", body: "payload"})
+	source := newFakeImageSource(t, tarEntry{name: "file", body: "payload"})
 	store, err := NewWithSource(Config{Dir: root, RefTTL: time.Hour}, source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := OpenRequest{ImageRef: "example.test/tool:v1"}
+	req := OpenRequest{Reference: "example.test/tool:v1"}
 	if _, err := store.Open(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -80,17 +110,20 @@ func TestStorePersistsReferenceMapping(t *testing.T) {
 	if _, err := restarted.Open(context.Background(), req); err != nil {
 		t.Fatalf("cached Open() called remote source: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(root, refsFilename)); err != nil {
+		t.Fatalf("reference mapping missing: %v", err)
+	}
 }
 
 func TestStoreCollapsesConcurrentOpen(t *testing.T) {
-	source := newFakeSource(t, tarEntry{name: "file", body: "payload"})
+	source := newFakeImageSource(t, tarEntry{name: "file", body: "payload"})
 	store := testStore(t, source)
 	var wait sync.WaitGroup
 	wait.Add(2)
 	for range 2 {
 		go func() {
 			defer wait.Done()
-			if _, err := store.Open(context.Background(), OpenRequest{ImageRef: "example.test/tool:v1"}); err != nil {
+			if _, err := store.Open(context.Background(), OpenRequest{Reference: "example.test/tool:v1"}); err != nil {
 				t.Errorf("Open() unexpected error: %v", err)
 			}
 		}()
@@ -102,31 +135,49 @@ func TestStoreCollapsesConcurrentOpen(t *testing.T) {
 }
 
 type fakeSource struct {
-	mu       sync.Mutex
-	calls    int
-	resolved *ResolvedImage
-	layers   map[string][]byte
-	err      error
+	mu        sync.Mutex
+	calls     int
+	blobOpens int
+	resolved  *ResolvedObject
+	layers    map[string][]byte
+	blobs     map[string][]byte
+	err       error
 }
 
-func newFakeSource(t *testing.T, entries ...tarEntry) *fakeSource {
+func newFakeImageSource(t *testing.T, entries ...tarEntry) *fakeSource {
 	t.Helper()
 	layer := tarLayer(t, entries...)
-	return &fakeSource{resolved: &ResolvedImage{
-		ManifestDigest: testManifestDigest,
-		Platform:       "linux/amd64",
-		Layers:         []ResolvedLayer{{Descriptor: LayerDescriptor{Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Layer: layer}},
+	return &fakeSource{resolved: &ResolvedObject{
+		Kind: ObjectKindImage, ManifestDigest: testManifestDigest,
+		ManifestMediaType: "application/vnd.oci.image.manifest.v1+json", Platform: "linux/amd64",
+		Layers: []ResolvedLayer{{
+			Descriptor: LayerDescriptor{Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			Layer:      layer,
+		}},
 	}, layers: map[string][]byte{"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": layer.(memoryLayer)}}
 }
 
-func (s *fakeSource) Resolve(context.Context, string, ociimage.OpenOptions) (*ResolvedImage, error) {
+func newFakeArtifactSource(payload []byte) *fakeSource {
+	digest := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	return &fakeSource{resolved: &ResolvedObject{
+		Kind: ObjectKindArtifact, ManifestDigest: testManifestDigest,
+		ManifestMediaType: "application/vnd.oci.image.manifest.v1+json",
+		ArtifactType:      "application/vnd.example.binary",
+		Annotations:       map[string]string{"org.opencontainers.image.created": "2026-08-11T00:00:00Z"},
+		Blobs: []BlobDescriptor{{
+			Digest: digest, MediaType: "application/octet-stream", Size: int64(len(payload)), Name: "rtty",
+		}},
+	}, blobs: map[string][]byte{digest: payload}}
+}
+
+func (s *fakeSource) Resolve(context.Context, string, ociimage.OpenOptions) (*ResolvedObject, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
 	return s.resolved, s.err
 }
 
-func (s *fakeSource) OpenLayer(_ context.Context, _ string, _ string, _ ociimage.OpenOptions, descriptor LayerDescriptor) (io.ReadCloser, error) {
+func (s *fakeSource) OpenLayer(_ context.Context, _ string, _ ociimage.OpenOptions, descriptor LayerDescriptor) (io.ReadCloser, error) {
 	data, ok := s.layers[descriptor.Digest]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -134,7 +185,28 @@ func (s *fakeSource) OpenLayer(_ context.Context, _ string, _ string, _ ociimage
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-func (s *fakeSource) callCount() int { s.mu.Lock(); defer s.mu.Unlock(); return s.calls }
+func (s *fakeSource) OpenBlob(_ context.Context, _ string, _ ociimage.OpenOptions, descriptor BlobDescriptor) (io.ReadCloser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blobOpens++
+	data, ok := s.blobs[descriptor.Digest]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (s *fakeSource) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+func (s *fakeSource) blobOpenCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.blobOpens
+}
 
 type memoryLayer []byte
 

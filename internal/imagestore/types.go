@@ -11,9 +11,19 @@ import (
 )
 
 var (
-	ErrImageNotFound  = errors.New("image not found in metadata store")
+	ErrObjectNotFound = errors.New("OCI object not found in metadata store")
+	ErrBlobNotFound   = errors.New("artifact blob not found")
+	ErrNotImage       = errors.New("OCI object is not an image")
+	ErrNotArtifact    = errors.New("OCI object is not an artifact")
 	ErrNotDirectory   = errors.New("image path is not a directory")
 	ErrNotRegularFile = errors.New("image path is not a regular file")
+)
+
+type ObjectKind string
+
+const (
+	ObjectKindImage    ObjectKind = "image"
+	ObjectKindArtifact ObjectKind = "artifact"
 )
 
 type EntryType string
@@ -31,19 +41,24 @@ type Config struct {
 }
 
 type OpenRequest struct {
-	ImageRef string
-	Platform *v1.Platform
-	Insecure bool
-	Refresh  bool
+	Reference string
+	Platform  *v1.Platform
+	Insecure  bool
+	Refresh   bool
 }
 
-type Image struct {
-	ImageID        string    `json:"imageId"`
-	ManifestDigest string    `json:"manifestDigest"`
-	ImageRef       string    `json:"imageRef"`
-	Platform       string    `json:"platform"`
-	Insecure       bool      `json:"insecure,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+type OCIObject struct {
+	ObjectID          string            `json:"objectId"`
+	Kind              ObjectKind        `json:"kind"`
+	ManifestDigest    string            `json:"manifestDigest"`
+	ManifestMediaType string            `json:"manifestMediaType"`
+	Reference         string            `json:"reference"`
+	Platform          string            `json:"platform,omitempty"`
+	Insecure          bool              `json:"insecure,omitempty"`
+	ArtifactType      string            `json:"artifactType,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	Blobs             []BlobDescriptor  `json:"blobs,omitempty"`
+	CreatedAt         time.Time         `json:"createdAt"`
 }
 
 type Entry struct {
@@ -78,18 +93,37 @@ type LayerDescriptor struct {
 	Size      int64  `json:"size"`
 }
 
+type BlobDescriptor struct {
+	Digest      string            `json:"digest"`
+	MediaType   string            `json:"mediaType"`
+	Size        int64             `json:"size"`
+	Name        string            `json:"name"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+type Blob struct {
+	Descriptor BlobDescriptor
+	Reader     io.ReadCloser
+}
+
 type ResolvedLayer struct {
 	Descriptor LayerDescriptor
 	Layer      Layer
 }
 
-type ResolvedImage struct {
-	ManifestDigest string
-	Platform       string
-	Layers         []ResolvedLayer
+type ResolvedObject struct {
+	Kind              ObjectKind
+	ManifestDigest    string
+	ManifestMediaType string
+	Platform          string
+	ArtifactType      string
+	Annotations       map[string]string
+	Blobs             []BlobDescriptor
+	Layers            []ResolvedLayer
 }
 
 type Source interface {
-	Resolve(ctx context.Context, imageRef string, opts ociimage.OpenOptions) (*ResolvedImage, error)
-	OpenLayer(ctx context.Context, imageRef, manifestDigest string, opts ociimage.OpenOptions, descriptor LayerDescriptor) (io.ReadCloser, error)
+	Resolve(ctx context.Context, reference string, opts ociimage.OpenOptions) (*ResolvedObject, error)
+	OpenLayer(ctx context.Context, reference string, opts ociimage.OpenOptions, descriptor LayerDescriptor) (io.ReadCloser, error)
+	OpenBlob(ctx context.Context, reference string, opts ociimage.OpenOptions, descriptor BlobDescriptor) (io.ReadCloser, error)
 }

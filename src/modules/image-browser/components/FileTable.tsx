@@ -10,7 +10,7 @@ import type { Key, ReactNode } from "react";
 import { useMemo } from "react";
 import type { ColumnsType } from "antd/es/table";
 import type { WorkbenchLocale } from "@lwmacct/260627-antd-workbench";
-import type { EntryType, ImageEntry, ImageSource } from "../model";
+import type { EntryType, ImageEntry, OCISource } from "../model";
 import { downloadHref, formatFileDate, formatFileMode, formatFileSize } from "../utils";
 import type { Text } from "@/shared/i18n";
 
@@ -19,7 +19,7 @@ interface FileTableProps {
   loading: boolean;
   locale: WorkbenchLocale;
   selectedPaths: string[];
-  source: ImageSource;
+  source: OCISource;
   text: Text["browser"];
   onNavigate(path: string): void;
   onSelectionChange(paths: string[]): void;

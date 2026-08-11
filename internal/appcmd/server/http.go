@@ -35,11 +35,14 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 	}
 	router := chi.NewRouter()
 	apiRouter := chi.NewRouter()
-	apiRouter.Get("/images/{imageID}/file", rt.handleImageFile)
-	apiRouter.Post("/images/{imageID}/archive", rt.handleImageArchive)
+	apiRouter.Get("/objects/{objectID}/file", rt.handleImageFile)
+	apiRouter.Head("/objects/{objectID}/file", rt.handleImageFile)
+	apiRouter.Post("/objects/{objectID}/archive", rt.handleImageArchive)
+	apiRouter.Get("/objects/{objectID}/blobs/{digest}", rt.handleArtifactBlob)
+	apiRouter.Head("/objects/{objectID}/blobs/{digest}", rt.handleArtifactBlob)
 	router.Mount("/api", apiRouter)
 	api := humachi.New(apiRouter, huma.DefaultConfig("OCIGet", version.AppVersion))
-	registerRoutes(api, cfg, rt.images)
+	registerRoutes(api, cfg, rt.objects)
 	frontend := newFrontendHTTPHandler()
 	rootHandler := func(w http.ResponseWriter, r *http.Request) {
 		if appCanHandleImagePath(rt, r) {
@@ -122,7 +125,7 @@ type metaOutput struct {
 	}
 }
 
-func registerRoutes(api huma.API, cfg *config.Server, images *imagestore.Store) {
+func registerRoutes(api huma.API, cfg *config.Server, objects *imagestore.Store) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-health",
 		Method:      http.MethodGet,
@@ -152,5 +155,5 @@ func registerRoutes(api huma.API, cfg *config.Server, images *imagestore.Store) 
 		return out, nil
 	})
 
-	registerImageRoutes(api, images)
+	registerImageRoutes(api, objects)
 }

@@ -1,4 +1,4 @@
-import type { ImageDirectory, ImageMaterialized, ImagePlatform, ImageSource } from "./model";
+import type { ImageDirectory, ImagePlatform, OCIObject, OCISource } from "./model";
 import { normalizeImagePath } from "./utils";
 
 interface PlatformsResponse {
@@ -15,15 +15,15 @@ export class APIError extends Error {
   }
 }
 
-export async function materializeImage(
-  source: ImageSource,
+export async function resolveOCIObject(
+  source: OCISource,
   signal?: AbortSignal,
-): Promise<ImageMaterialized> {
-  return requestJSON<ImageMaterialized>("/api/images", signal, {
+): Promise<OCIObject> {
+  return requestJSON<OCIObject>("/api/objects", signal, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ref: source.imageRef.trim(),
+      ref: source.reference.trim(),
       platform: source.platform.trim() || undefined,
       insecure: source.insecure || undefined,
     }),
@@ -31,38 +31,36 @@ export async function materializeImage(
 }
 
 export async function listImageFiles(
-  imageId: string,
+  objectId: string,
   path: string,
   signal?: AbortSignal,
 ): Promise<ImageDirectory> {
   const query = new URLSearchParams();
   query.set("path", normalizeImagePath(path));
-  return requestJSON<ImageDirectory>(`/api/images/${encodeURIComponent(imageId)}/entries?${query.toString()}`, signal);
+  return requestJSON<ImageDirectory>(`/api/objects/${encodeURIComponent(objectId)}/entries?${query.toString()}`, signal);
 }
 
-export async function listImagePlatforms(
-  source: Pick<ImageSource, "imageRef" | "insecure">,
+export async function listObjectPlatforms(
+  source: Pick<OCISource, "reference" | "insecure">,
   signal?: AbortSignal,
 ): Promise<ImagePlatform[]> {
-  const query = new URLSearchParams({ ref: source.imageRef.trim() });
+  const query = new URLSearchParams({ ref: source.reference.trim() });
   if (source.insecure) query.set("insecure", "true");
   const response = await requestJSON<PlatformsResponse>(
-    `/api/images/platforms?${query.toString()}`,
+    `/api/objects/platforms?${query.toString()}`,
     signal,
   );
   return response.platforms;
 }
 
 export async function downloadImageArchive(
-  imageId: string,
+  objectId: string,
   paths: string[],
 ): Promise<void> {
-  const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/archive`, {
+  const response = await fetch(`/api/objects/${encodeURIComponent(objectId)}/archive`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      paths,
-    }),
+    body: JSON.stringify({ paths }),
   });
   if (!response.ok) {
     throw await responseError(response);
@@ -77,6 +75,10 @@ export async function downloadImageArchive(
   link.click();
   link.remove();
   globalThis.setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+
+export function artifactBlobHref(objectId: string, digest: string): string {
+  return `/api/objects/${encodeURIComponent(objectId)}/blobs/${encodeURIComponent(digest)}`;
 }
 
 async function requestJSON<T>(url: string, signal?: AbortSignal, init: RequestInit = {}): Promise<T> {

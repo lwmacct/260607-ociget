@@ -83,9 +83,9 @@ func parseImagePathBool(values url.Values, key string) (bool, error) {
 
 func (o imagePathOptions) openRequest(imageRef string) imagestore.OpenRequest {
 	return imagestore.OpenRequest{
-		ImageRef: imageRef,
-		Platform: o.platform,
-		Insecure: o.insecure,
-		Refresh:  o.refresh,
+		Reference: imageRef,
+		Platform:  o.platform,
+		Insecure:  o.insecure,
+		Refresh:   o.refresh,
 	}
 }

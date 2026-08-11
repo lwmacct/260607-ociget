@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { downloadImageArchive, listImageFiles, listImagePlatforms, materializeImage } from "../api";
-import type { ImageBrowserSession, ImageMaterialized, ImageSource } from "../model";
-import { DEFAULT_IMAGE_SOURCE } from "../model";
+import { downloadImageArchive, listImageFiles, listObjectPlatforms, resolveOCIObject } from "../api";
+import type { BrowserSession, OCIImageObject, OCISource } from "../model";
+import { DEFAULT_OCI_SOURCE } from "../model";
 import {
   choosePlatform,
   normalizeImagePath,
@@ -10,23 +10,23 @@ import {
 } from "../utils";
 
 export function useImageBrowserSession() {
-  const [draft, setDraft] = useState<ImageSource>({ ...DEFAULT_IMAGE_SOURCE });
-  const [platformOptions, setPlatformOptions] = useState<string[]>([DEFAULT_IMAGE_SOURCE.platform]);
+  const [draft, setDraft] = useState<OCISource>({ ...DEFAULT_OCI_SOURCE });
+  const [platformOptions, setPlatformOptions] = useState<string[]>([DEFAULT_OCI_SOURCE.platform]);
   const [platformLoading, setPlatformLoading] = useState(false);
   const [platformError, setPlatformError] = useState<string | null>(null);
-  const [session, setSession] = useState<ImageBrowserSession | null>(null);
-  const [directoryLoading, setDirectoryLoading] = useState(false);
-  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [session, setSession] = useState<BrowserSession | null>(null);
+  const [objectLoading, setObjectLoading] = useState(false);
+  const [objectError, setObjectError] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const directoryRequest = useRef({ controller: null as AbortController | null, id: 0 });
-  const materializeRequest = useRef({ controller: null as AbortController | null, id: 0 });
+  const resolveRequest = useRef({ controller: null as AbortController | null, id: 0 });
   const platformRequest = useRef({ controller: null as AbortController | null, id: 0 });
 
   useEffect(() => () => {
     directoryRequest.current.controller?.abort();
-    materializeRequest.current.controller?.abort();
+    resolveRequest.current.controller?.abort();
     platformRequest.current.controller?.abort();
   }, []);
 
@@ -38,13 +38,13 @@ export function useImageBrowserSession() {
     setPlatformOptions(draft.platform ? [draft.platform] : []);
   }, [draftSourceKey]);
 
-  const updateDraft = useCallback((patch: Partial<ImageSource>) => {
+  const updateDraft = useCallback((patch: Partial<OCISource>) => {
     setDraft((current) => ({ ...current, ...patch }));
   }, []);
 
   const discoverPlatforms = useCallback(async () => {
-    const source = { ...draft, imageRef: draft.imageRef.trim() };
-    if (!source.imageRef) return;
+    const source = { ...draft, reference: draft.reference.trim() };
+    if (!source.reference) return;
 
     platformRequest.current.controller?.abort();
     const controller = new AbortController();
@@ -53,7 +53,7 @@ export function useImageBrowserSession() {
     setPlatformLoading(true);
     setPlatformError(null);
     try {
-      const platforms = await listImagePlatforms(source, controller.signal);
+      const platforms = await listObjectPlatforms(source, controller.signal);
       if (platformRequest.current.id !== id) return;
       const values = platforms.map(platformValue).filter(Boolean);
       setPlatformOptions(values);
@@ -73,23 +73,24 @@ export function useImageBrowserSession() {
   }, [draft]);
 
   const loadDirectory = useCallback(async (
-    image: ImageMaterialized,
-    source: ImageSource,
+    object: OCIImageObject,
+    source: OCISource,
     path: string,
   ) => {
     directoryRequest.current.controller?.abort();
     const controller = new AbortController();
     const id = directoryRequest.current.id + 1;
     directoryRequest.current = { controller, id };
-    setDirectoryLoading(true);
-    setDirectoryError(null);
+    setObjectLoading(true);
+    setObjectError(null);
     setArchiveError(null);
     try {
-      const directory = await listImageFiles(image.imageId, normalizeImagePath(path), controller.signal);
+      const directory = await listImageFiles(object.objectId, normalizeImagePath(path), controller.signal);
       if (directoryRequest.current.id !== id) return false;
       setSession({
+        kind: "image",
         source,
-        image,
+        object,
         directory: {
           ...directory,
           path: normalizeImagePath(directory.path),
@@ -99,63 +100,70 @@ export function useImageBrowserSession() {
       return true;
     } catch (error) {
       if (!isAbortError(error) && directoryRequest.current.id === id) {
-        setDirectoryError(errorMessage(error));
+        setObjectError(errorMessage(error));
       }
       return false;
     } finally {
       if (directoryRequest.current.id === id) {
-        setDirectoryLoading(false);
+        setObjectLoading(false);
       }
     }
   }, []);
 
-  const openImage = useCallback(async () => {
+  const openObject = useCallback(async () => {
     const source = {
-      imageRef: draft.imageRef.trim(),
+      reference: draft.reference.trim(),
       platform: draft.platform.trim(),
       insecure: draft.insecure,
     };
-    if (!source.imageRef) return false;
-    materializeRequest.current.controller?.abort();
+    if (!source.reference) return false;
+    resolveRequest.current.controller?.abort();
+    directoryRequest.current.controller?.abort();
     const controller = new AbortController();
-    const id = materializeRequest.current.id + 1;
-    materializeRequest.current = { controller, id };
-    setDirectoryLoading(true);
-    setDirectoryError(null);
+    const id = resolveRequest.current.id + 1;
+    resolveRequest.current = { controller, id };
+    setObjectLoading(true);
+    setObjectError(null);
+    setArchiveError(null);
     try {
-      const image = await materializeImage(source, controller.signal);
-      if (materializeRequest.current.id !== id) return false;
-      const directory = await listImageFiles(image.imageId, "/", controller.signal);
-      if (materializeRequest.current.id !== id) return false;
-      setSession({ source, image, directory });
+      const object = await resolveOCIObject(source, controller.signal);
+      if (resolveRequest.current.id !== id) return false;
+      if (object.kind === "artifact") {
+        setSession({ kind: "artifact", source, object });
+        setSelectedPaths([]);
+        return true;
+      }
+      const directory = await listImageFiles(object.objectId, "/", controller.signal);
+      if (resolveRequest.current.id !== id) return false;
+      setSession({ kind: "image", source, object, directory });
       setSelectedPaths([]);
       return true;
     } catch (error) {
-      if (!isAbortError(error) && materializeRequest.current.id === id) {
-        setDirectoryError(errorMessage(error));
+      if (!isAbortError(error) && resolveRequest.current.id === id) {
+        setObjectError(errorMessage(error));
       }
       return false;
     } finally {
-      if (materializeRequest.current.id === id) setDirectoryLoading(false);
+      if (resolveRequest.current.id === id) setObjectLoading(false);
     }
   }, [draft]);
 
   const navigate = useCallback(async (path: string) => {
-    if (!session) return false;
-    return loadDirectory(session.image, session.source, path);
+    if (!session || session.kind !== "image") return false;
+    return loadDirectory(session.object, session.source, path);
   }, [loadDirectory, session]);
 
   const reload = useCallback(async () => {
-    if (!session) return false;
-    return loadDirectory(session.image, session.source, session.directory.path);
+    if (!session || session.kind !== "image") return false;
+    return loadDirectory(session.object, session.source, session.directory.path);
   }, [loadDirectory, session]);
 
   const downloadSelected = useCallback(async () => {
-    if (!session || selectedPaths.length === 0) return false;
+    if (!session || session.kind !== "image" || selectedPaths.length === 0) return false;
     setArchiveLoading(true);
     setArchiveError(null);
     try {
-      await downloadImageArchive(session.image.imageId, selectedPaths);
+      await downloadImageArchive(session.object.objectId, selectedPaths);
       return true;
     } catch (error) {
       setArchiveError(errorMessage(error));
@@ -168,13 +176,13 @@ export function useImageBrowserSession() {
   return {
     archiveError,
     archiveLoading,
-    directoryError,
-    directoryLoading,
     discoverPlatforms,
     downloadSelected,
     draft,
     navigate,
-    openImage,
+    objectError,
+    objectLoading,
+    openObject,
     platformError,
     platformLoading,
     platformOptions,

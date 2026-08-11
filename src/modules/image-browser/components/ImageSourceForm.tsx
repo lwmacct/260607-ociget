@@ -5,33 +5,33 @@ import {
 } from "@ant-design/icons";
 import { Alert, AutoComplete, Button, Form, Input, Space, Switch, Typography } from "antd";
 import type { ChangeEvent } from "react";
-import type { ImageSource } from "../model";
+import type { OCISource } from "../model";
 import type { Text } from "@/shared/i18n";
 
 interface ImageSourceFormProps {
-  directoryLoading: boolean;
-  draft: ImageSource;
+  objectLoading: boolean;
+  draft: OCISource;
   platformError: string | null;
   platformLoading: boolean;
   platformOptions: string[];
   text: Text["browser"];
   onDiscoverPlatforms(): void;
-  onOpenImage(): void;
-  onUpdateDraft(patch: Partial<ImageSource>): void;
+  onOpenObject(): void;
+  onUpdateDraft(patch: Partial<OCISource>): void;
 }
 
 export function ImageSourceForm({
-  directoryLoading,
+  objectLoading,
   draft,
   platformError,
   platformLoading,
   platformOptions,
   text,
   onDiscoverPlatforms,
-  onOpenImage,
+  onOpenObject,
   onUpdateDraft,
 }: ImageSourceFormProps) {
-  const imageMissing = !draft.imageRef.trim();
+  const referenceMissing = !draft.reference.trim();
 
   return (
     <div className="image-source">
@@ -40,18 +40,18 @@ export function ImageSourceForm({
         <Typography.Title level={4}>{text.imageSource}</Typography.Title>
       </div>
 
-      <Form className="image-source__form" layout="vertical" onFinish={onOpenImage}>
+      <Form className="image-source__form" layout="vertical" onFinish={onOpenObject}>
         <Form.Item
-          label={text.image}
+          label={text.reference}
           required
-          validateStatus={imageMissing ? "error" : undefined}
-          help={imageMissing ? text.imageRequired : undefined}
+          validateStatus={referenceMissing ? "error" : undefined}
+          help={referenceMissing ? text.referenceRequired : undefined}
         >
           <Input
             autoComplete="off"
-            placeholder={text.imagePlaceholder}
-            value={draft.imageRef}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft({ imageRef: event.target.value })}
+            placeholder={text.referencePlaceholder}
+            value={draft.reference}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft({ reference: event.target.value })}
           />
         </Form.Item>
 
@@ -66,7 +66,7 @@ export function ImageSourceForm({
             />
             <Button
               aria-label={text.discoverPlatforms}
-              disabled={imageMissing}
+              disabled={referenceMissing}
               icon={<ReloadOutlined />}
               loading={platformLoading}
               title={text.discoverPlatforms}
@@ -95,13 +95,13 @@ export function ImageSourceForm({
 
         <Button
           block
-          disabled={imageMissing}
+          disabled={referenceMissing}
           htmlType="submit"
           icon={<SearchOutlined />}
-          loading={directoryLoading}
+          loading={objectLoading}
           type="primary"
         >
-          {text.openImage}
+          {text.openReference}
         </Button>
       </Form>
     </div>

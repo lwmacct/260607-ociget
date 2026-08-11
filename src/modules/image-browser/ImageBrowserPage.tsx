@@ -8,6 +8,7 @@ import { Alert, Empty, Spin } from "antd";
 import { DirectoryToolbar } from "./components/DirectoryToolbar";
 import { FileTable } from "./components/FileTable";
 import { ImageSourceForm } from "./components/ImageSourceForm";
+import { ArtifactDetails } from "./components/ArtifactDetails";
 import { useImageBrowserSession } from "./hooks/useImageBrowserSession";
 import { useText } from "@/shared/i18n";
 
@@ -22,14 +23,14 @@ export function ImageBrowserPage() {
       contentClassName="image-browser-workspace__content"
       sidebar={
         <ImageSourceForm
-          directoryLoading={browser.directoryLoading}
+          objectLoading={browser.objectLoading}
           draft={browser.draft}
           platformError={browser.platformError}
           platformLoading={browser.platformLoading}
           platformOptions={browser.platformOptions}
           text={text.browser}
           onDiscoverPlatforms={() => void browser.discoverPlatforms()}
-          onOpenImage={() => void browser.openImage()}
+          onOpenObject={() => void browser.openObject()}
           onUpdateDraft={browser.updateDraft}
         />
       }
@@ -37,12 +38,12 @@ export function ImageBrowserPage() {
       sidebarWidth={320}
     >
       <WorkbenchPage className="image-browser-page">
-        {browser.directoryError ? (
+        {browser.objectError ? (
           <Alert
             closable
-            description={browser.directoryError}
+            description={browser.objectError}
             showIcon
-            title={text.browser.browseFailed}
+            title={text.browser.resolveFailed}
             type="error"
           />
         ) : null}
@@ -56,11 +57,11 @@ export function ImageBrowserPage() {
           />
         ) : null}
 
-        {browser.session ? (
+        {browser.session?.kind === "image" ? (
           <div className="image-browser-page__browser">
             <DirectoryToolbar
               archiveLoading={browser.archiveLoading}
-              directoryLoading={browser.directoryLoading}
+              directoryLoading={browser.objectLoading}
               selectedCount={browser.selectedPaths.length}
               session={browser.session}
               text={text.browser}
@@ -70,7 +71,7 @@ export function ImageBrowserPage() {
             />
             <FileTable
               entries={browser.session.directory.entries}
-              loading={browser.directoryLoading}
+              loading={browser.objectLoading}
               locale={locale}
               selectedPaths={browser.selectedPaths}
               source={browser.session.source}
@@ -79,16 +80,17 @@ export function ImageBrowserPage() {
               onSelectionChange={browser.setSelectedPaths}
             />
           </div>
+        ) : browser.session?.kind === "artifact" ? (
+          <ArtifactDetails locale={locale} session={browser.session} text={text.browser} />
         ) : (
           <WorkbenchCenterState>
-            {browser.directoryLoading ? (
+            {browser.objectLoading ? (
               <Spin size="large" />
             ) : (
               <Empty
                 description={
                   <span>
-                    <strong>{text.browser.openAnImage}</strong>
-                    <small>{text.browser.openAnImageDescription}</small>
+                    <strong>{text.browser.openAReference}</strong>
                   </span>
                 }
               />

@@ -48,8 +48,8 @@ export function DirectoryToolbar({
     <div className="directory-toolbar">
       <div className="directory-toolbar__context">
         <Space size={[6, 6]} wrap>
-          <Tag icon={<FolderOpenOutlined />} title={session.source.imageRef}>
-            {session.source.imageRef}
+          <Tag icon={<FolderOpenOutlined />} title={session.source.reference}>
+            {session.source.reference}
           </Tag>
           {session.source.platform ? <Tag>{session.source.platform}</Tag> : null}
           {session.source.insecure ? <Tag color="gold">HTTP</Tag> : null}

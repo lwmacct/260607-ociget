@@ -1,6 +1,6 @@
 # OCIGet
 
-OCIGet is a web UI and HTTP API for inspecting OCI/Docker image filesystems. It indexes image manifests and layer metadata, lets you browse directories, and downloads files on demand from the registry that was requested.
+OCIGet is a web UI and HTTP API for OCI images and artifacts. It browses OCI/Docker image filesystems and presents OCI artifact payloads as directly downloadable blobs.
 
 The local store contains metadata only. It does not keep layer blobs or extracted file contents, so the source registry (or a registry proxy such as Harbor) must be reachable when a file is downloaded.
 
@@ -29,20 +29,23 @@ The production frontend can be built with `pnpm build`. When serving the generat
 
 ## Browser
 
-The default image in the browser is:
+The default OCI reference in the browser is:
 
 ```text
 ghcr.io/lwmacct/260607-ociget:latest
 ```
 
-The image browser supports:
+The browser supports:
 
-- image references from Docker Hub, GHCR, Harbor, or another OCI-compatible registry;
+- image and artifact references from Docker Hub, GHCR, Harbor, or another OCI-compatible registry;
 - platform selection such as `linux/amd64` or `linux/arm64`;
 - platform discovery before opening an image;
 - directory browsing with file metadata, permissions, and timestamps;
 - single-file downloads and multi-file tar downloads;
+- OCI artifact metadata and direct downloads of every payload descriptor;
 - registries that require the insecure HTTP option.
+
+Images and artifacts have separate views. Image layers are interpreted as filesystem tar archives. Artifact payloads retain their registry bytes and are never treated as directories or decompressed by OCIGet. ORAS file names are read from the `org.opencontainers.image.title` annotation.
 
 ## Direct Downloads
 
@@ -78,12 +81,12 @@ The download endpoint supports `GET`, `HEAD`, byte `Range` requests, `ETag`, and
 
 Interactive OpenAPI documentation is available at <http://localhost:40248/api/docs>, with the machine-readable specification at <http://localhost:40248/api/openapi.json>.
 
-### Resolve an image
+### Resolve an OCI object
 
-`POST /api/images` resolves an image and creates an immutable metadata index. The response contains an `imageId` that is bound to the image reference, platform, registry access mode, and resolved manifest digest.
+`POST /api/objects` resolves an image or artifact and creates an immutable metadata index. The response contains `kind` (`image` or `artifact`) and an `objectId` bound to the reference, platform, registry access mode, and resolved manifest digest. Artifact responses also contain `artifactType`, annotations, and payload descriptors.
 
 ```bash
-curl -X POST http://localhost:40248/api/images \
+curl -X POST http://localhost:40248/api/objects \
   -H 'content-type: application/json' \
   -d '{
     "ref": "ghcr.io/lwmacct/260607-ociget:latest",
@@ -96,14 +99,14 @@ Use `"refresh": true` to resolve a mutable tag again. Set `"insecure": true` for
 ### List a directory
 
 ```bash
-curl "http://localhost:40248/api/images/<imageId>/entries?path=/usr/local/bin"
+curl "http://localhost:40248/api/objects/<objectId>/entries?path=/usr/local/bin"
 ```
 
 ### Download one file
 
 ```bash
 curl -OJ \
-  "http://localhost:40248/api/images/<imageId>/file?path=/usr/local/bin/app"
+  "http://localhost:40248/api/objects/<objectId>/file?path=/usr/local/bin/app"
 ```
 
 ### Download several files as tar
@@ -113,8 +116,19 @@ curl -X POST \
   -H 'content-type: application/json' \
   -d '{"paths":["/usr/local/bin/app","/etc/os-release"]}' \
   -o image-files.tar \
-  "http://localhost:40248/api/images/<imageId>/archive"
+  "http://localhost:40248/api/objects/<objectId>/archive"
 ```
+
+### Download an artifact payload
+
+Use a digest returned in the artifact object's `blobs` array. The digest is checked against the immutable object index before OCIGet opens the registry blob.
+
+```bash
+curl -OJ \
+  "http://localhost:40248/api/objects/<objectId>/blobs/<blobDigest>"
+```
+
+Artifact downloads support `GET`, `HEAD`, byte `Range` requests, `ETag`, registry media types, and annotation-derived filenames.
 
 ### System endpoints
 
@@ -122,23 +136,23 @@ curl -X POST \
 | --- | --- | --- |
 | `GET` | `/api/health` | Service health and version. |
 | `GET` | `/api/meta` | Service name, version, listen address, and docs path. |
-| `GET` | `/api/images/platforms?ref=<image-ref>` | List platforms published by an image. |
+| `GET` | `/api/objects/platforms?ref=<oci-ref>` | List platforms published by an image. |
 
 ## Metadata Store
 
-The default metadata directory is `.local/image-metadata`:
+The default metadata directory is `.local/oci-metadata`:
 
 ```text
-.local/image-metadata/
-├── images/      # Immutable image filesystem indexes
-├── locks/       # Per-image build locks
-├── staging/    # Temporary metadata builds
-└── refs.json    # Reference-to-imageId mappings
+.local/oci-metadata/
+├── objects/            # Immutable image or artifact metadata indexes
+├── locks/              # Per-object build locks
+├── staging/            # Temporary metadata builds
+└── object-refs.json    # Reference-to-objectId mappings
 ```
 
-The store does not contain an `objects/` directory or layer/file content. A cached index can be reused for browsing, but downloading still reopens the corresponding layer from the image reference recorded in that index.
+The store never contains layer, extracted file, or artifact payload content. A cached index can be reused for browsing, but every download reopens the corresponding layer or blob from the recorded registry reference.
 
-`image-store.ref-ttl` controls how often a mutable reference such as `:latest` is resolved again. A digest-pinned reference is naturally stable; use `refresh=1` when an immediate re-resolution is required.
+`oci-store.ref-ttl` controls how often a mutable reference such as `:latest` is resolved again. A digest-pinned reference is naturally stable; use `refresh=1` when an immediate re-resolution is required.
 
 ## Configuration
 
@@ -150,8 +164,8 @@ server:
     listen: ":40248"
     tls:
       enabled: false
-  image-store:
-    dir: ".local/image-metadata"
+  oci-store:
+    dir: ".local/oci-metadata"
     ref-ttl: "5m"
 ```
 
@@ -160,8 +174,8 @@ The equivalent CLI options are shown by `go run . server --help`. The relevant o
 ```text
 --http.listen
 --http.tls.*
---image-store.dir
---image-store.ref-ttl
+--oci-store.dir
+--oci-store.ref-ttl
 ```
 
 ## Build and Docker

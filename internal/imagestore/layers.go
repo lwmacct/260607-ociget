@@ -8,9 +8,11 @@ import (
 	"io"
 	"path"
 	"strings"
+
+	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
-func applyLayers(ctx context.Context, index *imageIndex, layers []ResolvedLayer) error {
+func applyLayers(ctx context.Context, index *objectIndex, layers []ResolvedLayer) error {
 	for layerIndex, resolved := range layers {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -31,7 +33,7 @@ func applyLayers(ctx context.Context, index *imageIndex, layers []ResolvedLayer)
 	return nil
 }
 
-func applyLayer(ctx context.Context, index *imageIndex, reader io.Reader, descriptor LayerDescriptor) error {
+func applyLayer(ctx context.Context, index *objectIndex, reader io.Reader, descriptor LayerDescriptor) error {
 	tr := tar.NewReader(reader)
 	currentLayer := map[string]struct{}{}
 	for {
@@ -94,7 +96,7 @@ func openFileFromLayer(rc io.ReadCloser, tarPath, target string) (*File, error) 
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			_ = rc.Close()
-			return nil, ErrImageNotFound
+			return nil, ociimage.ErrNotFound
 		}
 		if err != nil {
 			_ = rc.Close()

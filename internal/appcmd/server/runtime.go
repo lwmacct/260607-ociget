@@ -15,8 +15,8 @@ import (
 const httpTLSMinVersion = tls.VersionTLS12
 
 type runtime struct {
-	tls    *tlsRuntime
-	images *imagestore.Store
+	tls     *tlsRuntime
+	objects *imagestore.Store
 }
 
 func newRuntime(ctx context.Context, cfg *config.Server) (_ *runtime, err error) {
@@ -32,12 +32,12 @@ func newRuntime(ctx context.Context, cfg *config.Server) (_ *runtime, err error)
 		return nil, fmt.Errorf("configure tls: %w", err)
 	}
 
-	refTTL, err := cfg.ImageStore.RefTTLDuration()
+	refTTL, err := cfg.OCIStore.RefTTLDuration()
 	if err != nil {
 		return nil, err
 	}
-	rt.images, err = imagestore.New(imagestore.Config{
-		Dir:    cfg.ImageStore.Dir,
+	rt.objects, err = imagestore.New(imagestore.Config{
+		Dir:    cfg.OCIStore.Dir,
 		RefTTL: refTTL,
 	})
 	if err != nil {

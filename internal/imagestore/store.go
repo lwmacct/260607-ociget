@@ -19,7 +19,10 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-const indexFilename = "index.json"
+const (
+	indexFilename = "index.json"
+	refsFilename  = "object-refs.json"
+)
 
 type Store struct {
 	dir     string
@@ -27,40 +30,40 @@ type Store struct {
 	source  Source
 	mu      sync.RWMutex
 	refs    map[string]refRecord
-	indexes map[string]*imageIndex
+	indexes map[string]*objectIndex
 	group   singleflight.Group
 }
 
 type refRecord struct {
-	ImageID    string    `json:"imageId"`
+	ObjectID   string    `json:"objectId"`
 	ResolvedAt time.Time `json:"resolvedAt"`
 }
 
-type imageIndex struct {
-	Image   Image             `json:"image"`
-	Layers  []LayerDescriptor `json:"layers"`
-	Entries map[string]Entry  `json:"entries"`
+type objectIndex struct {
+	Object  OCIObject         `json:"object"`
+	Layers  []LayerDescriptor `json:"layers,omitempty"`
+	Entries map[string]Entry  `json:"entries,omitempty"`
 }
 
 func New(cfg Config) (*Store, error) { return newStore(cfg, &remoteSource{}) }
 
 func NewWithSource(cfg Config, source Source) (*Store, error) {
 	if source == nil {
-		return nil, errors.New("image source is required")
+		return nil, errors.New("OCI source is required")
 	}
 	return newStore(cfg, source)
 }
 
 func newStore(cfg Config, source Source) (*Store, error) {
 	if strings.TrimSpace(cfg.Dir) == "" {
-		return nil, errors.New("image metadata directory is required")
+		return nil, errors.New("OCI metadata directory is required")
 	}
 	if cfg.RefTTL < 0 {
-		return nil, errors.New("image metadata ref TTL must not be negative")
+		return nil, errors.New("OCI metadata ref TTL must not be negative")
 	}
-	for _, name := range []string{"images", "staging", "locks"} {
+	for _, name := range []string{"objects", "staging", "locks"} {
 		if err := os.MkdirAll(filepath.Join(cfg.Dir, name), 0o700); err != nil {
-			return nil, fmt.Errorf("prepare image metadata store: %w", err)
+			return nil, fmt.Errorf("prepare OCI metadata store: %w", err)
 		}
 	}
 	if entries, err := os.ReadDir(filepath.Join(cfg.Dir, "staging")); err == nil {
@@ -68,67 +71,76 @@ func newStore(cfg Config, source Source) (*Store, error) {
 			_ = os.RemoveAll(filepath.Join(cfg.Dir, "staging", entry.Name()))
 		}
 	}
-	store := &Store{dir: cfg.Dir, refTTL: cfg.RefTTL, source: source, refs: map[string]refRecord{}, indexes: map[string]*imageIndex{}}
+	store := &Store{
+		dir: cfg.Dir, refTTL: cfg.RefTTL, source: source,
+		refs: map[string]refRecord{}, indexes: map[string]*objectIndex{},
+	}
 	if err := store.loadRefs(); err != nil {
 		return nil, err
 	}
 	return store, nil
 }
 
-func (s *Store) Open(ctx context.Context, req OpenRequest) (*Image, error) {
-	req.ImageRef = strings.TrimSpace(req.ImageRef)
-	if req.ImageRef == "" {
-		return nil, errors.New("image reference is required")
+func (s *Store) Open(ctx context.Context, req OpenRequest) (*OCIObject, error) {
+	req.Reference = strings.TrimSpace(req.Reference)
+	if req.Reference == "" {
+		return nil, errors.New("OCI reference is required")
 	}
 	key := refKey(req)
 	if !req.Refresh {
-		if image := s.cachedRef(key); image != nil {
-			return image, nil
+		if object := s.cachedRef(key); object != nil {
+			return object, nil
 		}
 	}
 	value, err, _ := s.group.Do("ref:"+key, func() (any, error) {
 		if !req.Refresh {
-			if image := s.cachedRef(key); image != nil {
-				return image, nil
+			if object := s.cachedRef(key); object != nil {
+				return object, nil
 			}
 		}
-		resolved, err := s.source.Resolve(ctx, req.ImageRef, ociimage.OpenOptions{Platform: req.Platform, Insecure: req.Insecure})
+		resolved, err := s.source.Resolve(ctx, req.Reference, ociimage.OpenOptions{Platform: req.Platform, Insecure: req.Insecure})
 		if err != nil {
 			return nil, err
 		}
-		if !validManifestDigest(resolved.ManifestDigest) {
+		if !validDigest(resolved.ManifestDigest) {
 			return nil, fmt.Errorf("invalid resolved manifest digest %q", resolved.ManifestDigest)
 		}
-		imageID := sourceImageID(req, resolved.ManifestDigest)
-		image, err := s.ensureImage(ctx, imageID, req, resolved)
+		if resolved.Kind != ObjectKindImage && resolved.Kind != ObjectKindArtifact {
+			return nil, fmt.Errorf("unsupported OCI object kind %q", resolved.Kind)
+		}
+		objectID := sourceObjectID(req, resolved.ManifestDigest)
+		object, err := s.ensureObject(ctx, objectID, req, resolved)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.saveRef(key, refRecord{ImageID: image.ImageID, ResolvedAt: time.Now().UTC()}); err != nil {
+		if err := s.saveRef(key, refRecord{ObjectID: object.ObjectID, ResolvedAt: time.Now().UTC()}); err != nil {
 			return nil, err
 		}
-		return image, nil
+		return object, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return value.(*Image), nil
+	return value.(*OCIObject), nil
 }
 
-func (s *Store) Image(imageID string) (*Image, error) {
-	index, err := s.loadIndex(imageID)
+func (s *Store) Object(objectID string) (*OCIObject, error) {
+	index, err := s.loadIndex(objectID)
 	if err != nil {
 		return nil, err
 	}
-	s.touchImage(imageID)
-	image := index.Image
-	return &image, nil
+	s.touchObject(objectID)
+	object := index.Object
+	return &object, nil
 }
 
-func (s *Store) List(imageID, inputPath string) (*Directory, error) {
-	index, err := s.loadIndex(imageID)
+func (s *Store) List(objectID, inputPath string) (*Directory, error) {
+	index, err := s.loadIndex(objectID)
 	if err != nil {
 		return nil, err
+	}
+	if index.Object.Kind != ObjectKindImage {
+		return nil, ErrNotImage
 	}
 	target, err := normalizePath(inputPath)
 	if err != nil {
@@ -154,10 +166,13 @@ func (s *Store) List(imageID, inputPath string) (*Directory, error) {
 	return &Directory{Path: target, Entries: entries}, nil
 }
 
-func (s *Store) OpenFile(imageID, inputPath string) (*File, error) {
-	index, err := s.loadIndex(imageID)
+func (s *Store) OpenFile(objectID, inputPath string) (*File, error) {
+	index, err := s.loadIndex(objectID)
 	if err != nil {
 		return nil, err
+	}
+	if index.Object.Kind != ObjectKindImage {
+		return nil, ErrNotImage
 	}
 	target, err := normalizePath(inputPath)
 	if err != nil {
@@ -173,192 +188,210 @@ func (s *Store) OpenFile(imageID, inputPath string) (*File, error) {
 	return &File{Entry: entry}, nil
 }
 
-func (s *Store) OpenFileReader(ctx context.Context, imageID, inputPath string) (*File, error) {
-	index, err := s.loadIndex(imageID)
+func (s *Store) OpenFileReader(ctx context.Context, objectID, inputPath string) (*File, error) {
+	index, err := s.loadIndex(objectID)
 	if err != nil {
 		return nil, err
 	}
-	target, err := normalizePath(inputPath)
+	file, err := s.OpenFile(objectID, inputPath)
 	if err != nil {
 		return nil, err
 	}
-	entry, ok := index.Entries[target]
-	if !ok {
-		return nil, ociimage.ErrNotFound
-	}
-	if entry.Type != EntryTypeFile || entry.LayerDigest == "" {
-		return nil, ErrNotRegularFile
-	}
-	options := ociimage.OpenOptions{Insecure: index.Image.Insecure}
-	if index.Image.Platform != "" && index.Image.Platform != "default" {
-		platform, err := ociimage.ParsePlatform(index.Image.Platform)
-		if err != nil {
-			return nil, err
-		}
-		options.Platform = &platform
-	}
-	reader, err := s.source.OpenLayer(ctx, index.Image.ImageRef, index.Image.ManifestDigest, options, LayerDescriptor{Digest: entry.LayerDigest})
+	reader, err := s.source.OpenLayer(ctx, index.Object.Reference, objectOpenOptions(index.Object), LayerDescriptor{Digest: file.Entry.LayerDigest})
 	if err != nil {
 		return nil, err
 	}
-	file, err := openFileFromLayer(reader, entry.TarPath, target)
+	opened, err := openFileFromLayer(reader, file.Entry.TarPath, file.Entry.Path)
 	if err != nil {
 		return nil, err
 	}
-	file.Entry = entry
-	return file, nil
+	opened.Entry = file.Entry
+	return opened, nil
 }
 
-func (s *Store) OpenFileForRequest(ctx context.Context, imageID, inputPath string, req OpenRequest) (*File, error) {
-	index, err := s.loadIndex(imageID)
+func (s *Store) OpenFileForRequest(ctx context.Context, objectID, inputPath string, req OpenRequest) (*File, error) {
+	file, err := s.OpenFile(objectID, inputPath)
 	if err != nil {
 		return nil, err
 	}
-	target, err := normalizePath(inputPath)
+	reader, err := s.source.OpenLayer(ctx, req.Reference, ociimage.OpenOptions{Platform: req.Platform, Insecure: req.Insecure}, LayerDescriptor{Digest: file.Entry.LayerDigest})
 	if err != nil {
 		return nil, err
 	}
-	entry, ok := index.Entries[target]
-	if !ok {
-		return nil, ociimage.ErrNotFound
-	}
-	if entry.Type != EntryTypeFile || entry.LayerDigest == "" {
-		return nil, ErrNotRegularFile
-	}
-	reader, err := s.source.OpenLayer(ctx, req.ImageRef, index.Image.ManifestDigest, ociimage.OpenOptions{Platform: req.Platform, Insecure: req.Insecure}, LayerDescriptor{Digest: entry.LayerDigest})
+	opened, err := openFileFromLayer(reader, file.Entry.TarPath, file.Entry.Path)
 	if err != nil {
 		return nil, err
 	}
-	file, err := openFileFromLayer(reader, entry.TarPath, target)
-	if err != nil {
-		return nil, err
-	}
-	file.Entry = entry
-	return file, nil
+	opened.Entry = file.Entry
+	return opened, nil
 }
 
-func (s *Store) ensureImage(ctx context.Context, imageID string, req OpenRequest, resolved *ResolvedImage) (*Image, error) {
-	if image, err := s.Image(imageID); err == nil {
-		return image, nil
+func (s *Store) ArtifactBlob(objectID, digest string) (*BlobDescriptor, error) {
+	index, err := s.loadIndex(objectID)
+	if err != nil {
+		return nil, err
 	}
-	value, err, _ := s.group.Do("image:"+imageID, func() (any, error) {
-		if image, err := s.Image(imageID); err == nil {
-			return image, nil
+	if index.Object.Kind != ObjectKindArtifact {
+		return nil, ErrNotArtifact
+	}
+	for _, blob := range index.Object.Blobs {
+		if blob.Digest == digest {
+			result := blob
+			return &result, nil
 		}
-		index, err := s.withImageLock(ctx, imageID, func() (*imageIndex, error) {
-			if index, err := s.loadIndex(imageID); err == nil {
+	}
+	return nil, ErrBlobNotFound
+}
+
+func (s *Store) OpenArtifactBlob(ctx context.Context, objectID, digest string) (*Blob, error) {
+	index, err := s.loadIndex(objectID)
+	if err != nil {
+		return nil, err
+	}
+	descriptor, err := s.ArtifactBlob(objectID, digest)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := s.source.OpenBlob(ctx, index.Object.Reference, objectOpenOptions(index.Object), *descriptor)
+	if err != nil {
+		return nil, err
+	}
+	return &Blob{Descriptor: *descriptor, Reader: reader}, nil
+}
+
+func (s *Store) ensureObject(ctx context.Context, objectID string, req OpenRequest, resolved *ResolvedObject) (*OCIObject, error) {
+	if object, err := s.Object(objectID); err == nil {
+		return object, nil
+	}
+	value, err, _ := s.group.Do("object:"+objectID, func() (any, error) {
+		if object, err := s.Object(objectID); err == nil {
+			return object, nil
+		}
+		index, err := s.withObjectLock(ctx, objectID, func() (*objectIndex, error) {
+			if index, err := s.loadIndex(objectID); err == nil {
 				return index, nil
 			}
-			return s.build(ctx, imageID, req, resolved)
+			return s.build(ctx, objectID, req, resolved)
 		})
 		if err != nil {
 			return nil, err
 		}
-		return &index.Image, nil
+		return &index.Object, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return value.(*Image), nil
+	return value.(*OCIObject), nil
 }
 
-func (s *Store) build(ctx context.Context, imageID string, req OpenRequest, resolved *ResolvedImage) (*imageIndex, error) {
-	stage, err := os.MkdirTemp(filepath.Join(s.dir, "staging"), "image-*")
+func (s *Store) build(ctx context.Context, objectID string, req OpenRequest, resolved *ResolvedObject) (*objectIndex, error) {
+	stage, err := os.MkdirTemp(filepath.Join(s.dir, "staging"), "object-*")
 	if err != nil {
 		return nil, fmt.Errorf("create metadata staging directory: %w", err)
 	}
 	defer os.RemoveAll(stage)
-	index := &imageIndex{
-		Image:   Image{ImageID: imageID, ManifestDigest: resolved.ManifestDigest, ImageRef: req.ImageRef, Platform: resolved.Platform, Insecure: req.Insecure, CreatedAt: time.Now().UTC()},
-		Layers:  make([]LayerDescriptor, 0, len(resolved.Layers)),
-		Entries: map[string]Entry{"/": {Name: "/", Path: "/", Type: EntryTypeDirectory, Size: -1}},
+	index := &objectIndex{
+		Object: OCIObject{
+			ObjectID: objectID, Kind: resolved.Kind, ManifestDigest: resolved.ManifestDigest,
+			ManifestMediaType: resolved.ManifestMediaType, Reference: req.Reference,
+			Platform: resolved.Platform, Insecure: req.Insecure, ArtifactType: resolved.ArtifactType,
+			Annotations: cloneAnnotations(resolved.Annotations), Blobs: cloneBlobs(resolved.Blobs),
+			CreatedAt: time.Now().UTC(),
+		},
 	}
-	for _, layer := range resolved.Layers {
-		index.Layers = append(index.Layers, layer.Descriptor)
-	}
-	if err := applyLayers(ctx, index, resolved.Layers); err != nil {
-		return nil, err
+	if resolved.Kind == ObjectKindImage {
+		index.Layers = make([]LayerDescriptor, 0, len(resolved.Layers))
+		index.Entries = map[string]Entry{"/": {Name: "/", Path: "/", Type: EntryTypeDirectory, Size: -1}}
+		for _, layer := range resolved.Layers {
+			index.Layers = append(index.Layers, layer.Descriptor)
+		}
+		if err := applyLayers(ctx, index, resolved.Layers); err != nil {
+			return nil, err
+		}
 	}
 	data, err := json.Marshal(index)
 	if err != nil {
-		return nil, fmt.Errorf("encode image metadata: %w", err)
+		return nil, fmt.Errorf("encode OCI metadata: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(stage, indexFilename), data, 0o600); err != nil {
-		return nil, fmt.Errorf("write image metadata: %w", err)
+		return nil, fmt.Errorf("write OCI metadata: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(stage, ".access"), nil, 0o600); err != nil {
-		return nil, fmt.Errorf("write image access marker: %w", err)
+		return nil, fmt.Errorf("write OCI access marker: %w", err)
 	}
-	final := s.imageDir(imageID)
+	final := s.objectDir(objectID)
 	if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
-		return nil, fmt.Errorf("prepare image metadata directory: %w", err)
+		return nil, fmt.Errorf("prepare OCI metadata directory: %w", err)
 	}
 	if err := os.Rename(stage, final); err != nil {
 		if _, statErr := os.Stat(filepath.Join(final, indexFilename)); statErr != nil {
-			return nil, fmt.Errorf("publish image metadata: %w", err)
+			return nil, fmt.Errorf("publish OCI metadata: %w", err)
 		}
 	}
 	s.mu.Lock()
-	s.indexes[imageID] = index
+	s.indexes[objectID] = index
 	s.mu.Unlock()
 	return index, nil
 }
 
-func (s *Store) loadIndex(imageID string) (*imageIndex, error) {
-	if !validImageID(imageID) {
-		return nil, ErrImageNotFound
+func (s *Store) loadIndex(objectID string) (*objectIndex, error) {
+	if !validDigest(objectID) {
+		return nil, ErrObjectNotFound
 	}
 	s.mu.RLock()
-	index := s.indexes[imageID]
+	index := s.indexes[objectID]
 	s.mu.RUnlock()
 	if index != nil {
 		return index, nil
 	}
-	data, err := os.ReadFile(filepath.Join(s.imageDir(imageID), indexFilename))
+	data, err := os.ReadFile(filepath.Join(s.objectDir(objectID), indexFilename))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrImageNotFound
+			return nil, ErrObjectNotFound
 		}
 		return nil, err
 	}
-	index = &imageIndex{}
+	index = &objectIndex{}
 	if err := json.Unmarshal(data, index); err != nil {
-		return nil, fmt.Errorf("decode image metadata: %w", err)
+		return nil, fmt.Errorf("decode OCI metadata: %w", err)
+	}
+	if index.Object.Kind != ObjectKindImage && index.Object.Kind != ObjectKindArtifact {
+		return nil, fmt.Errorf("decode OCI metadata: invalid kind %q", index.Object.Kind)
 	}
 	s.mu.Lock()
-	if current := s.indexes[imageID]; current != nil {
+	if current := s.indexes[objectID]; current != nil {
 		index = current
 	} else {
-		s.indexes[imageID] = index
+		s.indexes[objectID] = index
 	}
 	s.mu.Unlock()
 	return index, nil
 }
 
-func (s *Store) cachedRef(key string) *Image {
+func (s *Store) cachedRef(key string) *OCIObject {
 	s.mu.RLock()
 	record, ok := s.refs[key]
 	s.mu.RUnlock()
 	if !ok || (s.refTTL > 0 && time.Since(record.ResolvedAt) > s.refTTL) {
 		return nil
 	}
-	image, err := s.Image(record.ImageID)
+	object, err := s.Object(record.ObjectID)
 	if err != nil {
 		return nil
 	}
-	return image
+	return object
 }
 
 func (s *Store) loadRefs() error {
-	data, err := os.ReadFile(filepath.Join(s.dir, "refs.json"))
+	data, err := os.ReadFile(filepath.Join(s.dir, refsFilename))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read image refs: %w", err)
+		return fmt.Errorf("read OCI refs: %w", err)
 	}
 	if err := json.Unmarshal(data, &s.refs); err != nil {
-		return fmt.Errorf("decode image refs: %w", err)
+		return fmt.Errorf("decode OCI refs: %w", err)
 	}
 	return nil
 }
@@ -369,38 +402,38 @@ func (s *Store) saveRef(key string, record refRecord) error {
 	s.refs[key] = record
 	data, err := json.Marshal(s.refs)
 	if err != nil {
-		return fmt.Errorf("encode image refs: %w", err)
+		return fmt.Errorf("encode OCI refs: %w", err)
 	}
-	tmp, err := os.CreateTemp(s.dir, ".refs-*.tmp")
+	tmp, err := os.CreateTemp(s.dir, ".object-refs-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create image refs file: %w", err)
+		return fmt.Errorf("create OCI refs file: %w", err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write image refs: %w", err)
+		return fmt.Errorf("write OCI refs: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close image refs: %w", err)
+		return fmt.Errorf("close OCI refs: %w", err)
 	}
-	if err := os.Rename(tmpName, filepath.Join(s.dir, "refs.json")); err != nil {
-		return fmt.Errorf("publish image refs: %w", err)
+	if err := os.Rename(tmpName, filepath.Join(s.dir, refsFilename)); err != nil {
+		return fmt.Errorf("publish OCI refs: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) touchImage(imageID string) {
-	_ = os.Chtimes(filepath.Join(s.imageDir(imageID), ".access"), time.Now(), time.Now())
+func (s *Store) touchObject(objectID string) {
+	_ = os.Chtimes(filepath.Join(s.objectDir(objectID), ".access"), time.Now(), time.Now())
 }
 
-func (s *Store) imageDir(imageID string) string {
-	parts := strings.SplitN(imageID, ":", 2)
-	return filepath.Join(s.dir, "images", parts[0], parts[1])
+func (s *Store) objectDir(objectID string) string {
+	parts := strings.SplitN(objectID, ":", 2)
+	return filepath.Join(s.dir, "objects", parts[0], parts[1])
 }
 
 func refKey(req OpenRequest) string {
-	return fmt.Sprintf("%t\n%s\n%s", req.Insecure, req.ImageRef, platformString(req.Platform))
+	return fmt.Sprintf("%t\n%s\n%s", req.Insecure, req.Reference, platformString(req.Platform))
 }
 
 func platformString(platform *v1.Platform) string {
@@ -414,14 +447,14 @@ func platformString(platform *v1.Platform) string {
 	return strings.Join(parts, "/")
 }
 
-func sourceImageID(req OpenRequest, manifestDigest string) string {
-	key := fmt.Sprintf("%t\n%s\n%s\n%s", req.Insecure, req.ImageRef, platformString(req.Platform), manifestDigest)
+func sourceObjectID(req OpenRequest, manifestDigest string) string {
+	key := fmt.Sprintf("%t\n%s\n%s\n%s", req.Insecure, req.Reference, platformString(req.Platform), manifestDigest)
 	digest := sha256.Sum256([]byte(key))
 	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
-func validImageID(imageID string) bool {
-	parts := strings.SplitN(imageID, ":", 2)
+func validDigest(value string) bool {
+	parts := strings.SplitN(value, ":", 2)
 	if len(parts) != 2 || parts[0] != "sha256" || len(parts[1]) != 64 {
 		return false
 	}
@@ -433,7 +466,28 @@ func validImageID(imageID string) bool {
 	return true
 }
 
-func validManifestDigest(value string) bool { return validImageID(value) }
+func objectOpenOptions(object OCIObject) ociimage.OpenOptions {
+	options := ociimage.OpenOptions{Insecure: object.Insecure}
+	if object.Platform != "" && object.Platform != "default" {
+		platform, err := ociimage.ParsePlatform(object.Platform)
+		if err == nil {
+			options.Platform = &platform
+		}
+	}
+	return options
+}
+
+func cloneBlobs(input []BlobDescriptor) []BlobDescriptor {
+	if len(input) == 0 {
+		return nil
+	}
+	result := make([]BlobDescriptor, len(input))
+	for index, blob := range input {
+		result[index] = blob
+		result[index].Annotations = cloneAnnotations(blob.Annotations)
+	}
+	return result
+}
 
 func sortEntries(entries []Entry) {
 	sort.Slice(entries, func(i, j int) bool {

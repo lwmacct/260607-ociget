@@ -12,49 +12,49 @@ import (
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
-type createImageInput struct {
+type createObjectInput struct {
 	Body struct {
-		Ref      string `json:"ref" required:"true" doc:"Image reference"`
+		Ref      string `json:"ref" required:"true" doc:"OCI image or artifact reference"`
 		Platform string `json:"platform,omitempty" doc:"Platform as os/arch or os/arch/variant"`
-		Insecure bool   `json:"insecure,omitempty" doc:"Allow insecure image registry access"`
+		Insecure bool   `json:"insecure,omitempty" doc:"Allow insecure registry access"`
 		Refresh  bool   `json:"refresh,omitempty" doc:"Resolve the mutable reference again"`
 	}
 }
 
-type createImageOutput struct {
-	Body imagestore.Image
+type createObjectOutput struct {
+	Body imagestore.OCIObject
 }
 
-type listImageEntriesInput struct {
-	ImageID string `path:"imageID" doc:"Immutable source-bound metadata image identifier"`
-	Path    string `query:"path" default:"/" doc:"Directory path inside the image"`
+type listObjectEntriesInput struct {
+	ObjectID string `path:"objectID" doc:"Immutable OCI object metadata identifier"`
+	Path     string `query:"path" default:"/" doc:"Directory path inside the image"`
 }
 
-type listImageEntriesOutput struct {
+type listObjectEntriesOutput struct {
 	Body imagestore.Directory
 }
 
-type listImagePlatformsInput struct {
-	Ref      string `query:"ref" required:"true" doc:"Image reference"`
-	Insecure bool   `query:"insecure" doc:"Allow insecure image registry access"`
+type listObjectPlatformsInput struct {
+	Ref      string `query:"ref" required:"true" doc:"OCI image or artifact reference"`
+	Insecure bool   `query:"insecure" doc:"Allow insecure registry access"`
 }
 
-type listImagePlatformsOutput struct {
+type listObjectPlatformsOutput struct {
 	Body struct {
 		Platforms []ociimage.Platform `json:"platforms"`
 	}
 }
 
-func registerImageRoutes(api huma.API, images *imagestore.Store) {
+func registerImageRoutes(api huma.API, objects *imagestore.Store) {
 	huma.Register(api, huma.Operation{
-		OperationID: "create-image",
+		OperationID: "create-object",
 		Method:      http.MethodPost,
-		Path:        "/images",
-		Summary:     "Resolve an image and index its filesystem metadata",
-		Tags:        []string{"images"},
-	}, func(ctx context.Context, input *createImageInput) (*createImageOutput, error) {
-		if images == nil {
-			return nil, huma.Error503ServiceUnavailable("image store unavailable")
+		Path:        "/objects",
+		Summary:     "Resolve an OCI image or artifact",
+		Tags:        []string{"objects"},
+	}, func(ctx context.Context, input *createObjectInput) (*createObjectOutput, error) {
+		if objects == nil {
+			return nil, huma.Error503ServiceUnavailable("OCI object store unavailable")
 		}
 		var platform *v1.Platform
 		platformParam := strings.TrimSpace(input.Body.Platform)
@@ -65,64 +65,66 @@ func registerImageRoutes(api huma.API, images *imagestore.Store) {
 			}
 			platform = &parsed
 		}
-		image, err := images.Open(ctx, imagestore.OpenRequest{
-			ImageRef: input.Body.Ref,
-			Platform: platform,
-			Insecure: input.Body.Insecure,
-			Refresh:  input.Body.Refresh,
+		object, err := objects.Open(ctx, imagestore.OpenRequest{
+			Reference: input.Body.Ref,
+			Platform:  platform,
+			Insecure:  input.Body.Insecure,
+			Refresh:   input.Body.Refresh,
 		})
 		if err != nil {
-			return nil, imageStoreAPIError(err)
+			return nil, objectStoreAPIError(err)
 		}
-		return &createImageOutput{Body: *image}, nil
+		return &createObjectOutput{Body: *object}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "list-image-entries",
+		OperationID: "list-object-entries",
 		Method:      http.MethodGet,
-		Path:        "/images/{imageID}/entries",
+		Path:        "/objects/{objectID}/entries",
 		Summary:     "List an indexed image directory",
-		Tags:        []string{"images"},
-	}, func(_ context.Context, input *listImageEntriesInput) (*listImageEntriesOutput, error) {
-		if images == nil {
-			return nil, huma.Error503ServiceUnavailable("image store unavailable")
+		Tags:        []string{"objects"},
+	}, func(_ context.Context, input *listObjectEntriesInput) (*listObjectEntriesOutput, error) {
+		if objects == nil {
+			return nil, huma.Error503ServiceUnavailable("OCI object store unavailable")
 		}
-		directory, err := images.List(input.ImageID, input.Path)
+		directory, err := objects.List(input.ObjectID, input.Path)
 		if err != nil {
-			return nil, imageStoreAPIError(err)
+			return nil, objectStoreAPIError(err)
 		}
-		return &listImageEntriesOutput{Body: *directory}, nil
+		return &listObjectEntriesOutput{Body: *directory}, nil
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "list-image-platforms",
+		OperationID: "list-object-platforms",
 		Method:      http.MethodGet,
-		Path:        "/images/platforms",
-		Summary:     "List image platforms",
-		Tags:        []string{"images"},
-	}, func(ctx context.Context, input *listImagePlatformsInput) (*listImagePlatformsOutput, error) {
+		Path:        "/objects/platforms",
+		Summary:     "List OCI image platforms",
+		Tags:        []string{"objects"},
+	}, func(ctx context.Context, input *listObjectPlatformsInput) (*listObjectPlatformsOutput, error) {
 		extractor := &ociimage.Extractor{}
 		platforms, err := extractor.Platforms(ctx, input.Ref, ociimage.OpenOptions{Insecure: input.Insecure})
 		if err != nil {
-			return nil, huma.Error502BadGateway("failed to read image platforms")
+			return nil, huma.Error502BadGateway("failed to read OCI object platforms")
 		}
-		out := &listImagePlatformsOutput{}
+		out := &listObjectPlatformsOutput{}
 		out.Body.Platforms = platforms
 		return out, nil
 	})
 }
 
-func imageStoreAPIError(err error) error {
+func objectStoreAPIError(err error) error {
 	switch {
 	case errors.Is(err, ociimage.ErrInvalidPath):
 		return huma.Error400BadRequest("invalid path")
-	case errors.Is(err, ociimage.ErrNotFound), errors.Is(err, imagestore.ErrImageNotFound):
-		return huma.Error404NotFound("path or image not found")
+	case errors.Is(err, ociimage.ErrNotFound), errors.Is(err, imagestore.ErrObjectNotFound), errors.Is(err, imagestore.ErrBlobNotFound):
+		return huma.Error404NotFound("OCI object or path not found")
+	case errors.Is(err, imagestore.ErrNotImage):
+		return huma.Error422UnprocessableEntity("OCI artifact does not contain an image filesystem")
 	case errors.Is(err, imagestore.ErrNotDirectory):
 		return huma.Error422UnprocessableEntity("path is not a directory")
 	case errors.Is(err, imagestore.ErrNotRegularFile):
 		return huma.Error422UnprocessableEntity("path is not a regular file")
 	default:
-		return huma.Error502BadGateway("failed to index image metadata")
+		return huma.Error502BadGateway("failed to resolve OCI object")
 	}
 }
