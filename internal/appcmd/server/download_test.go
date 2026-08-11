@@ -88,6 +88,63 @@ func TestImagePathDownload(t *testing.T) {
 	}
 }
 
+func TestArtifactPathDownloadByTitle(t *testing.T) {
+	handler, _, _ := artifactRouteTestHandler(t)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet,
+		"/example.test/tool:artifact/-/rtty",
+		nil,
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "raw-payload" {
+		t.Fatalf("body = %q, want raw-payload", recorder.Body.String())
+	}
+}
+
+func TestArtifactPathDownloadByDigestSupportsRanges(t *testing.T) {
+	handler, _, digest := artifactRouteTestHandler(t)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/example.test/tool:artifact/-/@"+digest,
+		nil,
+	)
+	request.Header.Set("Range", "bytes=4-10")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "payload" {
+		t.Fatalf("body = %q, want payload", recorder.Body.String())
+	}
+}
+
+func TestArtifactPathDownloadRejectsAmbiguousTitle(t *testing.T) {
+	digest := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	secondDigest := "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	source := &routeTestSource{
+		resolved: &imagestore.ResolvedObject{
+			Kind: imagestore.ObjectKindArtifact, ManifestDigest: routeTestManifestDigest,
+			ManifestMediaType: "application/vnd.oci.image.manifest.v1+json",
+			ArtifactType:      "application/vnd.example.binary",
+			Blobs: []imagestore.BlobDescriptor{
+				{Digest: digest, Size: 3, Name: "rtty", Annotations: map[string]string{"org.opencontainers.image.title": "rtty"}},
+				{Digest: secondDigest, Size: 3, Name: "rtty", Annotations: map[string]string{"org.opencontainers.image.title": "./rtty"}},
+			},
+		},
+		blobs: map[string][]byte{digest: []byte("one"), secondDigest: []byte("two")},
+	}
+	handler, _ := routeTestHandler(t, source, "example.test/tool:artifact")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/example.test/tool:artifact/-/rtty", nil))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestArtifactBlobDownloadsOriginalBytes(t *testing.T) {
 	handler, objectID, digest := artifactRouteTestHandler(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/objects/"+escapePathSegment(objectID)+"/blobs/"+escapePathSegment(digest), nil)
@@ -176,6 +233,7 @@ func artifactRouteTestHandler(t *testing.T) (http.Handler, string, string) {
 			ArtifactType:      "application/vnd.example.binary",
 			Blobs: []imagestore.BlobDescriptor{{
 				Digest: digest, MediaType: "application/octet-stream", Size: int64(len(payload)), Name: "rtty",
+				Annotations: map[string]string{"org.opencontainers.image.title": "rtty"},
 			}},
 		},
 		blobs: map[string][]byte{digest: payload},

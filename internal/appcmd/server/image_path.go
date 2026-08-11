@@ -10,38 +10,38 @@ import (
 	"github.com/lwmacct/260607-ociget/internal/ociimage"
 )
 
-const imagePathSeparator = "/-/"
+const objectPathSeparator = "/-/"
 
-// parseImagePath splits /<image-ref>/-/<image-path> at the first separator.
-func parseImagePath(urlPath string) (string, string, error) {
+// parseObjectPath splits /<oci-ref>/-/<selector> at the first separator.
+func parseObjectPath(urlPath string) (string, string, error) {
 	if !strings.HasPrefix(urlPath, "/") {
-		return "", "", fmt.Errorf("image path must start with /")
+		return "", "", fmt.Errorf("OCI object path must start with /")
 	}
 	rest := strings.TrimPrefix(urlPath, "/")
-	separatorIndex := strings.Index(rest, imagePathSeparator)
+	separatorIndex := strings.Index(rest, objectPathSeparator)
 	if separatorIndex < 0 {
-		return "", "", fmt.Errorf("image path must be /<image-ref>/-/<path>")
+		return "", "", fmt.Errorf("OCI object path must be /<oci-ref>/-/<selector>")
 	}
-	imageRef := strings.TrimSpace(rest[:separatorIndex])
-	filePath := strings.TrimSpace(rest[separatorIndex+len(imagePathSeparator):])
-	if imageRef == "" || filePath == "" {
-		return "", "", fmt.Errorf("image and path are required")
+	reference := strings.TrimSpace(rest[:separatorIndex])
+	selector := strings.TrimSpace(rest[separatorIndex+len(objectPathSeparator):])
+	if reference == "" || selector == "" {
+		return "", "", fmt.Errorf("OCI reference and selector are required")
 	}
-	filePath, err := ociimage.NormalizePath(filePath)
+	selector, err := ociimage.NormalizePath(selector)
 	if err != nil {
 		return "", "", err
 	}
-	return imageRef, filePath, nil
+	return reference, selector, nil
 }
 
-type imagePathOptions struct {
+type objectPathOptions struct {
 	platform *v1.Platform
 	insecure bool
 	refresh  bool
 }
 
-func parseImagePathOptions(values url.Values) (imagePathOptions, error) {
-	var options imagePathOptions
+func parseObjectPathOptions(values url.Values) (objectPathOptions, error) {
+	var options objectPathOptions
 	platformParam := strings.TrimSpace(values.Get("platform"))
 	if platformParam != "" {
 		platform, err := ociimage.ParsePlatform(platformParam)
@@ -50,11 +50,11 @@ func parseImagePathOptions(values url.Values) (imagePathOptions, error) {
 		}
 		options.platform = &platform
 	}
-	insecure, err := parseImagePathBool(values, "insecure")
+	insecure, err := parseObjectPathBool(values, "insecure")
 	if err != nil {
 		return options, err
 	}
-	refresh, err := parseImagePathBool(values, "refresh")
+	refresh, err := parseObjectPathBool(values, "refresh")
 	if err != nil {
 		return options, err
 	}
@@ -63,7 +63,7 @@ func parseImagePathOptions(values url.Values) (imagePathOptions, error) {
 	return options, nil
 }
 
-func parseImagePathBool(values url.Values, key string) (bool, error) {
+func parseObjectPathBool(values url.Values, key string) (bool, error) {
 	value, ok := values[key]
 	if !ok {
 		return false, nil
@@ -81,9 +81,9 @@ func parseImagePathBool(values url.Values, key string) (bool, error) {
 	}
 }
 
-func (o imagePathOptions) openRequest(imageRef string) imagestore.OpenRequest {
+func (o objectPathOptions) openRequest(reference string) imagestore.OpenRequest {
 	return imagestore.OpenRequest{
-		Reference: imageRef,
+		Reference: reference,
 		Platform:  o.platform,
 		Insecure:  o.insecure,
 		Refresh:   o.refresh,

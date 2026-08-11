@@ -1,4 +1,10 @@
-import { DEFAULT_OCI_SOURCE, type EntryType, type ImagePlatform, type OCISource } from "./model";
+import {
+  DEFAULT_OCI_SOURCE,
+  type EntryType,
+  type ImagePlatform,
+  type OCIArtifactObject,
+  type OCISource,
+} from "./model";
 
 export interface PathCrumb {
   label: string;
@@ -85,8 +91,33 @@ export function downloadHref(source: Pick<OCISource, "reference" | "platform" | 
   if (source.platform.trim()) query.set("platform", source.platform.trim());
   if (source.insecure) query.set("insecure", "1");
   const suffix = query.toString();
-  const imageRef = source.reference.trim().split("/")
+  const imageRef = encodeOCIReference(source.reference);
+  return `/${imageRef}/-/${normalizeImagePath(path).replace(/^\//, "")}${suffix ? `?${suffix}` : ""}`;
+}
+
+export function artifactDirectHref(
+  object: Pick<OCIArtifactObject, "reference" | "manifestDigest">,
+  blobDigest: string,
+  insecure: boolean,
+): string {
+  const reference = pinOCIReference(object.reference, object.manifestDigest);
+  return `/${encodeOCIReference(reference)}/-/@${blobDigest}${insecure ? "?insecure=1" : ""}`;
+}
+
+export function pinOCIReference(reference: string, manifestDigest: string): string {
+  const trimmed = reference.trim();
+  const digestIndex = trimmed.lastIndexOf("@");
+  if (digestIndex >= 0) {
+    return `${trimmed.slice(0, digestIndex)}@${manifestDigest}`;
+  }
+  const slashIndex = trimmed.lastIndexOf("/");
+  const tagIndex = trimmed.lastIndexOf(":");
+  const repository = tagIndex > slashIndex ? trimmed.slice(0, tagIndex) : trimmed;
+  return `${repository}@${manifestDigest}`;
+}
+
+function encodeOCIReference(reference: string): string {
+  return reference.trim().split("/")
     .map((segment) => encodeURIComponent(segment).replace(/%3A/gi, ":").replace(/%40/gi, "@"))
     .join("/");
-  return `/${imageRef}/-/${normalizeImagePath(path).replace(/^\//, "")}${suffix ? `?${suffix}` : ""}`;
 }

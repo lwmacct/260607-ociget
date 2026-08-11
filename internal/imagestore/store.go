@@ -243,6 +243,45 @@ func (s *Store) ArtifactBlob(objectID, digest string) (*BlobDescriptor, error) {
 	return nil, ErrBlobNotFound
 }
 
+func (s *Store) ArtifactBlobBySelector(objectID, input string) (*BlobDescriptor, error) {
+	index, err := s.loadIndex(objectID)
+	if err != nil {
+		return nil, err
+	}
+	if index.Object.Kind != ObjectKindArtifact {
+		return nil, ErrNotArtifact
+	}
+	selector, err := normalizeArtifactSelector(input)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(selector, "@") {
+		digest := strings.TrimPrefix(selector, "@")
+		if !validDigest(digest) {
+			return nil, ErrInvalidBlobSelector
+		}
+		return s.ArtifactBlob(objectID, digest)
+	}
+
+	var matched *BlobDescriptor
+	for _, blob := range index.Object.Blobs {
+		title := blob.Annotations[artifactTitleAnnotation]
+		candidate, err := normalizeArtifactSelector(title)
+		if err != nil || candidate != selector {
+			continue
+		}
+		if matched != nil {
+			return nil, ErrAmbiguousBlob
+		}
+		result := blob
+		matched = &result
+	}
+	if matched == nil {
+		return nil, ErrBlobNotFound
+	}
+	return matched, nil
+}
+
 func (s *Store) OpenArtifactBlob(ctx context.Context, objectID, digest string) (*Blob, error) {
 	index, err := s.loadIndex(objectID)
 	if err != nil {
@@ -464,6 +503,14 @@ func validDigest(value string) bool {
 		}
 	}
 	return true
+}
+
+func normalizeArtifactSelector(input string) (string, error) {
+	normalized, err := ociimage.NormalizePath(input)
+	if err != nil || normalized == "/" {
+		return "", ErrInvalidBlobSelector
+	}
+	return strings.TrimPrefix(normalized, "/"), nil
 }
 
 func objectOpenOptions(object OCIObject) ociimage.OpenOptions {

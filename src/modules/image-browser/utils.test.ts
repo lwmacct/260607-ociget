@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { ImagePlatform } from "./model";
 import {
   choosePlatform,
+  artifactDirectHref,
   downloadHref,
   imagePathCrumbs,
   normalizeImagePath,
   parentImagePath,
+  pinOCIReference,
 } from "./utils";
 
 describe("image path utilities", () => {
@@ -50,5 +52,23 @@ describe("image source utilities", () => {
   it("escapes image reference delimiters", () => {
     expect(downloadHref({ reference: "registry.example/acme/tool:v1#unsafe", platform: "", insecure: true }, "/bin/app"))
       .toBe("/registry.example/acme/tool:v1%23unsafe/-/bin/app?insecure=1");
+  });
+
+  it("pins tagged and port-qualified OCI references", () => {
+    expect(pinOCIReference("ghcr.io/acme/tool:v1", "sha256:manifest"))
+      .toBe("ghcr.io/acme/tool@sha256:manifest");
+    expect(pinOCIReference("registry.example:5000/acme/tool", "sha256:manifest"))
+      .toBe("registry.example:5000/acme/tool@sha256:manifest");
+    expect(pinOCIReference("ghcr.io/acme/tool@sha256:old", "sha256:new"))
+      .toBe("ghcr.io/acme/tool@sha256:new");
+  });
+
+  it("builds manifest-pinned artifact direct downloads", () => {
+    expect(artifactDirectHref({
+      reference: "ghcr.io/acme/tool:v1",
+      manifestDigest: "sha256:manifest",
+    }, "sha256:blob", true)).toBe(
+      "/ghcr.io/acme/tool@sha256:manifest/-/@sha256:blob?insecure=1",
+    );
   });
 });

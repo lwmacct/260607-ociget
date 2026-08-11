@@ -3,13 +3,14 @@ import {
   DownloadOutlined,
   FileOutlined,
   InboxOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
-import { Button, Descriptions, Empty, Table, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Descriptions, Empty, Space, Table, Tag, Tooltip, Typography } from "antd";
 import { useMemo } from "react";
 import type { ColumnsType } from "antd/es/table";
 import type { ArtifactBlob, ArtifactSession } from "../model";
 import { artifactBlobHref } from "../api";
-import { formatFileDate, formatFileSize } from "../utils";
+import { artifactDirectHref, formatFileDate, formatFileSize } from "../utils";
 import type { Text } from "@/shared/i18n";
 
 interface ArtifactDetailsProps {
@@ -22,6 +23,18 @@ const createdAnnotation = "org.opencontainers.image.created";
 
 export function ArtifactDetails({ locale, session, text }: ArtifactDetailsProps) {
   const { object, source } = session;
+  const { message } = App.useApp();
+
+  async function copyDirectLink(blob: ArtifactBlob) {
+    const href = artifactDirectHref(object, blob.digest, source.insecure);
+    try {
+      await navigator.clipboard.writeText(new URL(href, window.location.origin).href);
+      void message.success(text.directLinkCopied);
+    } catch {
+      void message.error(text.directLinkCopyFailed);
+    }
+  }
+
   const columns = useMemo<ColumnsType<ArtifactBlob>>(() => [
     {
       title: text.name,
@@ -66,19 +79,28 @@ export function ArtifactDetails({ locale, session, text }: ArtifactDetailsProps)
       title: "",
       key: "actions",
       align: "right",
-      width: 56,
+      fixed: "right",
+      width: 92,
       render: (_, blob) => (
-        <Tooltip title={text.downloadFile(blob.name)}>
-          <Button
-            aria-label={text.downloadFile(blob.name)}
-            href={artifactBlobHref(object.objectId, blob.digest)}
-            icon={<DownloadOutlined />}
-            size="small"
-          />
-        </Tooltip>
+        <Space.Compact size="small">
+          <Tooltip title={text.copyDirectLink}>
+            <Button
+              aria-label={text.copyDirectLink}
+              icon={<LinkOutlined />}
+              onClick={() => void copyDirectLink(blob)}
+            />
+          </Tooltip>
+          <Tooltip title={text.downloadFile(blob.name)}>
+            <Button
+              aria-label={text.downloadFile(blob.name)}
+              href={artifactBlobHref(object.objectId, blob.digest)}
+              icon={<DownloadOutlined />}
+            />
+          </Tooltip>
+        </Space.Compact>
       ),
     },
-  ], [object.objectId, text]);
+  ], [message, object, source.insecure, text]);
 
   return (
     <div className="artifact-view">

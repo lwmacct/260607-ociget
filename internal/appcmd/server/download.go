@@ -42,32 +42,42 @@ func (app *runtime) handleImageFile(w http.ResponseWriter, r *http.Request) {
 	app.serveImageFile(w, r, objectID, file, imagestore.OpenRequest{})
 }
 
-func (app *runtime) handleImagePathDownload(w http.ResponseWriter, r *http.Request) {
+func (app *runtime) handleObjectPathDownload(w http.ResponseWriter, r *http.Request) {
 	if app.objects == nil {
-		http.Error(w, "image store unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "OCI object store unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	imageRef, filePath, err := parseImagePath(r.URL.Path)
+	reference, selector, err := parseObjectPath(r.URL.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	options, err := parseImagePathOptions(r.URL.Query())
+	options, err := parseObjectPathOptions(r.URL.Query())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	object, err := app.objects.Open(r.Context(), options.openRequest(imageRef))
+	request := options.openRequest(reference)
+	object, err := app.objects.Open(r.Context(), request)
 	if err != nil {
-		writeImagePathError(w, err)
+		writeDirectObjectError(w, err)
 		return
 	}
-	file, err := app.objects.OpenFile(object.ObjectID, filePath)
-	if err != nil {
-		writeImagePathError(w, err)
+	if object.Kind == imagestore.ObjectKindArtifact {
+		descriptor, err := app.objects.ArtifactBlobBySelector(object.ObjectID, selector)
+		if err != nil {
+			writeDirectObjectError(w, err)
+			return
+		}
+		app.serveArtifactBlob(w, r, object.ObjectID, descriptor)
 		return
 	}
-	app.serveImageFile(w, r, object.ObjectID, file, options.openRequest(imageRef))
+	file, err := app.objects.OpenFile(object.ObjectID, selector)
+	if err != nil {
+		writeDirectObjectError(w, err)
+		return
+	}
+	app.serveImageFile(w, r, object.ObjectID, file, request)
 }
 
 func (app *runtime) serveImageFile(w http.ResponseWriter, r *http.Request, objectID string, file *imagestore.File, request imagestore.OpenRequest) {
@@ -135,6 +145,10 @@ func (app *runtime) handleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 		writeArtifactBlobError(w, err)
 		return
 	}
+	app.serveArtifactBlob(w, r, objectID, descriptor)
+}
+
+func (app *runtime) serveArtifactBlob(w http.ResponseWriter, r *http.Request, objectID string, descriptor *imagestore.BlobDescriptor) {
 	mediaType := descriptor.MediaType
 	if _, _, err := mime.ParseMediaType(mediaType); err != nil {
 		mediaType = "application/octet-stream"
@@ -153,7 +167,7 @@ func (app *runtime) handleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid range", http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
-	blob, err := app.objects.OpenArtifactBlob(r.Context(), objectID, digest)
+	blob, err := app.objects.OpenArtifactBlob(r.Context(), objectID, descriptor.Digest)
 	if err != nil {
 		writeArtifactBlobError(w, err)
 		return
@@ -299,6 +313,21 @@ func writeImagePathError(w http.ResponseWriter, err error) {
 		http.Error(w, "path is not a regular file", http.StatusUnprocessableEntity)
 	default:
 		http.Error(w, "failed to read image", http.StatusBadGateway)
+	}
+}
+
+func writeDirectObjectError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ociimage.ErrInvalidPath), errors.Is(err, imagestore.ErrInvalidBlobSelector):
+		http.Error(w, "invalid OCI object selector", http.StatusBadRequest)
+	case errors.Is(err, imagestore.ErrAmbiguousBlob):
+		http.Error(w, "artifact blob selector is ambiguous", http.StatusConflict)
+	case errors.Is(err, ociimage.ErrNotFound), errors.Is(err, imagestore.ErrObjectNotFound), errors.Is(err, imagestore.ErrBlobNotFound):
+		http.Error(w, "OCI object or payload not found", http.StatusNotFound)
+	case errors.Is(err, imagestore.ErrNotDirectory), errors.Is(err, imagestore.ErrNotRegularFile):
+		http.Error(w, "image path is not a regular file", http.StatusUnprocessableEntity)
+	default:
+		http.Error(w, "failed to read OCI object", http.StatusBadGateway)
 	}
 }
 

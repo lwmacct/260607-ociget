@@ -47,21 +47,37 @@ The browser supports:
 
 Images and artifacts have separate views. Image layers are interpreted as filesystem tar archives. Artifact payloads retain their registry bytes and are never treated as directories or decompressed by OCIGet. ORAS file names are read from the `org.opencontainers.image.title` annotation.
 
+See [docs/oras.md](docs/oras.md) for ORAS push, pull, verification, and `FROM scratch` image examples.
+
 ## Direct Downloads
 
 The compact root URL format is:
 
 ```text
-/<image-ref>/-/<path>
+/<oci-ref>/-/<selector>
 ```
 
-The first `/-/` separates the complete image reference from the path inside the image. For example:
+The first `/-/` separates the complete OCI reference from the download selector. For an image, the selector is a path inside its filesystem:
 
 ```bash
 wget "http://localhost:40248/ghcr.io/lwmacct/260607-ociget:latest/-/usr/local/bin/app"
 ```
 
-A registry proxy is expressed as part of the image reference. For example:
+For an OCI artifact, the selector can be the payload title from its `org.opencontainers.image.title` annotation:
+
+```bash
+wget "http://localhost:40248/ghcr.io/lwmacct/260607-ociget:artifact-oras-guide-v1/-/oras.md"
+```
+
+Use `@<blob-digest>` when an exact, immutable artifact payload is required. The blob must belong to the resolved artifact manifest:
+
+```bash
+wget "http://localhost:40248/ghcr.io/lwmacct/260607-ociget@sha256:678218e9aa088bca3cca0c567b42d71440e46a3eb00d673f98c29858d10d63e2/-/@sha256:8fa4d6b06ff06b12708522331bac55456c5977e3ce34dc8382c8cfbd537fe465"
+```
+
+Title selectors are normalized as safe relative paths. A missing title returns `404`, an invalid selector returns `400`, and duplicate normalized titles return `409`. The artifact view's link button copies the manifest-pinned digest form.
+
+A registry proxy is expressed as part of the OCI reference. For example:
 
 ```bash
 wget "http://localhost:40248/harbor.example.com/ghcr.io/lwmacct/260607-ociget:latest/-/usr/local/bin/app"

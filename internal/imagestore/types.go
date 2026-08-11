@@ -11,12 +11,14 @@ import (
 )
 
 var (
-	ErrObjectNotFound = errors.New("OCI object not found in metadata store")
-	ErrBlobNotFound   = errors.New("artifact blob not found")
-	ErrNotImage       = errors.New("OCI object is not an image")
-	ErrNotArtifact    = errors.New("OCI object is not an artifact")
-	ErrNotDirectory   = errors.New("image path is not a directory")
-	ErrNotRegularFile = errors.New("image path is not a regular file")
+	ErrObjectNotFound      = errors.New("OCI object not found in metadata store")
+	ErrBlobNotFound        = errors.New("artifact blob not found")
+	ErrInvalidBlobSelector = errors.New("invalid artifact blob selector")
+	ErrAmbiguousBlob       = errors.New("artifact blob selector is ambiguous")
+	ErrNotImage            = errors.New("OCI object is not an image")
+	ErrNotArtifact         = errors.New("OCI object is not an artifact")
+	ErrNotDirectory        = errors.New("image path is not a directory")
+	ErrNotRegularFile      = errors.New("image path is not a regular file")
 )
 
 type ObjectKind string

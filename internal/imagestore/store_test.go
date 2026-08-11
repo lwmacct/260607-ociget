@@ -77,6 +77,20 @@ func TestStoreIndexesArtifactWithoutFetchingPayload(t *testing.T) {
 	if _, err := store.List(object.ObjectID, "/"); err != ErrNotImage {
 		t.Fatalf("List() error = %v, want ErrNotImage", err)
 	}
+	byName, err := store.ArtifactBlobBySelector(object.ObjectID, "rtty")
+	if err != nil || byName.Digest != object.Blobs[0].Digest {
+		t.Fatalf("ArtifactBlobBySelector(name) = %#v, %v", byName, err)
+	}
+	byDigest, err := store.ArtifactBlobBySelector(object.ObjectID, "@"+object.Blobs[0].Digest)
+	if err != nil || byDigest.Digest != object.Blobs[0].Digest {
+		t.Fatalf("ArtifactBlobBySelector(digest) = %#v, %v", byDigest, err)
+	}
+	if _, err := store.ArtifactBlobBySelector(object.ObjectID, "@sha256:bad"); err != ErrInvalidBlobSelector {
+		t.Fatalf("invalid digest selector error = %v", err)
+	}
+	if _, err := store.ArtifactBlobBySelector(object.ObjectID, "../rtty"); err != ErrInvalidBlobSelector {
+		t.Fatalf("unsafe name selector error = %v", err)
+	}
 
 	blob, err := store.OpenArtifactBlob(context.Background(), object.ObjectID, object.Blobs[0].Digest)
 	if err != nil {
@@ -89,6 +103,24 @@ func TestStoreIndexesArtifactWithoutFetchingPayload(t *testing.T) {
 	}
 	if _, err := store.OpenArtifactBlob(context.Background(), object.ObjectID, "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"); err != ErrBlobNotFound {
 		t.Fatalf("unlisted blob error = %v, want ErrBlobNotFound", err)
+	}
+}
+
+func TestStoreRejectsAmbiguousArtifactTitle(t *testing.T) {
+	source := newFakeArtifactSource([]byte("first"))
+	secondDigest := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	source.resolved.Blobs = append(source.resolved.Blobs, BlobDescriptor{
+		Digest: secondDigest, MediaType: "application/octet-stream", Size: 6, Name: "rtty",
+		Annotations: map[string]string{artifactTitleAnnotation: "./rtty"},
+	})
+	source.blobs[secondDigest] = []byte("second")
+	store := testStore(t, source)
+	object, err := store.Open(context.Background(), OpenRequest{Reference: "example.test/tool:artifact"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ArtifactBlobBySelector(object.ObjectID, "rtty"); err != ErrAmbiguousBlob {
+		t.Fatalf("ambiguous selector error = %v", err)
 	}
 }
 
@@ -166,6 +198,7 @@ func newFakeArtifactSource(payload []byte) *fakeSource {
 		Annotations:       map[string]string{"org.opencontainers.image.created": "2026-08-11T00:00:00Z"},
 		Blobs: []BlobDescriptor{{
 			Digest: digest, MediaType: "application/octet-stream", Size: int64(len(payload)), Name: "rtty",
+			Annotations: map[string]string{artifactTitleAnnotation: "rtty"},
 		}},
 	}, blobs: map[string][]byte{digest: payload}}
 }

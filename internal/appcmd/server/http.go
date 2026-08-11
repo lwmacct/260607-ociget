@@ -45,8 +45,8 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 	registerRoutes(api, cfg, rt.objects)
 	frontend := newFrontendHTTPHandler()
 	rootHandler := func(w http.ResponseWriter, r *http.Request) {
-		if appCanHandleImagePath(rt, r) {
-			rt.handleImagePathDownload(w, r)
+		if appCanHandleObjectPath(rt, r) {
+			rt.handleObjectPathDownload(w, r)
 			return
 		}
 		frontend.ServeHTTP(w, r)
@@ -55,11 +55,11 @@ func newHTTPHandler(cfg *config.Server, rt *runtime) http.Handler {
 	return router
 }
 
-func appCanHandleImagePath(rt *runtime, r *http.Request) bool {
+func appCanHandleObjectPath(rt *runtime, r *http.Request) bool {
 	return rt != nil &&
 		(r.Method == http.MethodGet || r.Method == http.MethodHead) &&
 		!strings.HasPrefix(r.URL.Path, "/api/") &&
-		strings.Contains(r.URL.Path, imagePathSeparator)
+		strings.Contains(r.URL.Path, objectPathSeparator)
 }
 
 func newFrontendHTTPHandler() http.Handler {
