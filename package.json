@@ -1,6 +1,6 @@
 {
   "name": "@lwmacct/260607-ociget",
-  "version": "0.18.260801",
+  "version": "0.19.260811",
   "packageManager": "pnpm@11.18.0",
   "private": true,
   "type": "module",
